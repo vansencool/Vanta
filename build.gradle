@@ -1,0 +1,81 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'me.champeau.jmh' version '0.7.3'
+}
+
+group = 'net.vansencool'
+version = '1.0.0-BETA'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api "org.ow2.asm:asm:9.9.1"
+
+    implementation "org.jetbrains:annotations:26.0.2"
+
+    testImplementation platform('org.junit:junit-bom:6.0.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation "org.ow2.asm:asm-commons:9.9.1"
+    testImplementation "org.ow2.asm:asm-util:9.9.1"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    jmh "org.openjdk.jmh:jmh-core:1.37"
+    jmh "org.openjdk.jmh:jmh-generator-annprocess:1.37"
+    jmh "org.ow2.asm:asm:9.9.1"
+    jmh "org.ow2.asm:asm-util:9.9.1"
+}
+
+configurations.jmh {
+    resolutionStrategy.force "org.ow2.asm:asm:9.9.1"
+    resolutionStrategy.force "org.ow2.asm:asm-util:9.9.1"
+}
+
+jmh {
+    timeUnit = 'us'
+    includes = ['.*Benchmark.*']
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-parameters']
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+
+    repositories {
+        maven {
+            url = uri("https://repository.vansencool.net")
+
+            credentials {
+                username = "vansen"
+                password = project.findProperty("repoPass") ?: System.getenv("REPO_PASS")
+            }
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    jvmArgs += ['--add-opens', 'java.base/java.lang=ALL-UNNAMED']
+}
