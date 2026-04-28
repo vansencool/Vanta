@@ -40,7 +40,7 @@ Vanta compiles standard Java source code directly to `.class` bytecode, serving 
 
 ```groovy
 repositories {
-    maven { url 'https://repository.vansencool.net' }
+    maven { url = 'https://repository.vansencool.net' }
 }
 
 dependencies {
@@ -118,10 +118,10 @@ Benchmark results via JMH on modern hardware.
 
 | Scenario | javac | Vanta | Vanta (parallel) | Speedup |
 |---|---|---|---|---|
-| **Gson (warm)** | 92.98 ms | 16.32 ms | 2.66 ms | **~5.7x / ~35x parallel** |
-| **Gson (cold)** | 697.8 ms | 315.2 ms | 248.5 ms | **~2.2x / ~2.8x parallel** |
-| **Self-compilation (warm)** | 159.7 ms | 29.21 ms | 10.44 ms | **~5.5x / ~15x parallel** |
-| **Self-compilation (cold)** | 896.1 ms | 408.2 ms | 335.9 ms | **~2.2x / ~2.7x parallel** |
+| **Gson (warm)** | 91.69 ms | 15.59 ms | 2.55 ms | **~5.9x / ~36x parallel** |
+| **Gson (cold)** | 707.93 ms | 298.09 ms | 236.65 ms | **~2.4x / ~3.0x parallel** |
+| **Self-compilation (warm)** | 182.95 ms | 31.64 ms | 4.98 ms | **~5.8x / ~37x parallel** |
+| **Self-compilation (cold)** | 989.52 ms | 407.91 ms | 324.38 ms | **~2.4x / ~3.1x parallel** |
 
 ---
 

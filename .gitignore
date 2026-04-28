@@ -15,5 +15,11 @@
 !gradlew.bat
 !gradle.properties
 
+!profiles/
+!profiles/**
+
+!test-libraries/
+!test-libraries/**
+
 !README.md
 !LICENSE
