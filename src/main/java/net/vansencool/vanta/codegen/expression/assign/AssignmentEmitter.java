@@ -138,11 +138,22 @@ public final class AssignmentEmitter {
             }
         } else if (assignment.target() instanceof ArrayAccessExpression arrayAccess) {
             ResolvedType elemType = ctx.typeInferrer().infer(arrayAccess);
+            String elemDesc = elemType != null ? elemType.descriptor() : "I";
             exprGen.generate(arrayAccess.array());
             exprGen.generate(arrayAccess.index());
-            exprGen.generate(assignment.value(), elemType);
-            if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
-            ctx.mv().visitInsn(Opcodes.DUP_X2);
+            if ("=".equals(assignment.operator())) {
+                exprGen.generate(assignment.value(), elemType);
+                if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
+            } else {
+                ctx.mv().visitInsn(Opcodes.DUP2);
+                ctx.mv().visitInsn(exprGen.arrayEmitter().arrayLoadOpcodeFor(arrayAccess));
+                exprGen.generate(assignment.value());
+                if (elemType != null) adaptCompoundRhs(assignment.operator(), elemType, assignment.value());
+                emitCompoundAssignOp(assignment.operator(), elemDesc);
+                NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), elemDesc);
+            }
+            int dupX2 = ResolvedType.fromDescriptor(elemDesc).stackSize() == 2 ? Opcodes.DUP2_X2 : Opcodes.DUP_X2;
+            ctx.mv().visitInsn(dupX2);
             ctx.mv().visitInsn(exprGen.arrayEmitter().arrayStoreOpcodeFor(arrayAccess));
         }
     }

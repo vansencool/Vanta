@@ -407,7 +407,10 @@ public final class ExpressionTypeInferrer {
         if (expr instanceof ArrayInitializerExpression) return ResolvedType.INT.asArray(1);
         if (expr instanceof BinaryExpression binary) return inferBinary(binary);
         if (expr instanceof UnaryExpression unary) return inferUnary(unary);
-        if (expr instanceof AssignmentExpression assign) return infer(assign.value());
+        if (expr instanceof AssignmentExpression assign) {
+            ResolvedType targetType = infer(assign.target());
+            return targetType != null ? targetType : infer(assign.value());
+        }
         if (expr instanceof MethodCallExpression call) return inferMethodCall(call);
         if (expr instanceof FieldAccessExpression field) return inferFieldAccess(field);
         return null;
