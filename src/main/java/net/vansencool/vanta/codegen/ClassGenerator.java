@@ -47,6 +47,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -671,17 +672,19 @@ public final class ClassGenerator {
      * @param fieldTypes   output map for declared field types
      * @param selfMethods  output map for self-method info
      */
-    public void collectFieldsAndMethods(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    public void collectFieldsAndMethods(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         Map<String, Object> constants = new HashMap<>();
         for (AstNode member : classDecl.members()) {
             if (member instanceof FieldDeclaration fieldDecl) {
                 generateField(cw, fieldDecl);
+                boolean fieldIsStatic = (fieldDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
                 for (FieldDeclarator declarator : fieldDecl.declarators()) {
                     TypeNode effectiveType = fieldDecl.type();
                     if (declarator.extraArrayDimensions() > 0) {
                         effectiveType = effectiveType.withExtraDimensions(declarator.extraArrayDimensions());
                     }
                     fieldTypes.put(declarator.name(), typeResolver.resolve(effectiveType));
+                    if (fieldIsStatic) staticFieldNames.add(declarator.name());
                     Object cv = constantFolder.resolveConstantValue(fieldDecl, declarator);
                     if (cv != null) constants.put(declarator.name(), cv);
                 }

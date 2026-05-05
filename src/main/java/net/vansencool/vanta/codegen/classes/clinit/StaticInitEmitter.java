@@ -22,6 +22,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Emits {@code <clinit>} static initializers for class, interface, and record
@@ -57,11 +58,11 @@ public final class StaticInitEmitter {
      * @param fieldTypes    resolved types of declared fields on the owning class
      * @param selfMethods   self-method table for resolving same-class calls
      */
-    public void emitClassClinit(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    public void emitClassClinit(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         if (!owner.hasStaticFieldInitOrBlock(classDecl)) return;
         RecordingMethodVisitor buffer = new RecordingMethodVisitor();
         buffer.visitCode();
-        ClinitRig rig = buildRig(cw, buffer, internalName, superInternal, fieldTypes, selfMethods);
+        ClinitRig rig = buildRig(cw, buffer, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods);
         emitStaticFieldAndBlocks(classDecl, internalName, buffer, rig);
         finishAndFlush(cw, buffer);
     }
@@ -78,7 +79,7 @@ public final class StaticInitEmitter {
      * @param fieldTypes   resolved types of declared fields
      * @param selfMethods  self-method table for same-class calls
      */
-    public void emitInterfaceClinit(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    public void emitInterfaceClinit(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         boolean needsClinit = false;
         for (AstNode m : classDecl.members()) {
             if (m instanceof FieldDeclaration fd) {
@@ -95,7 +96,7 @@ public final class StaticInitEmitter {
 
         MethodVisitor mv = cw.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
         mv.visitCode();
-        ClinitRig rig = buildRig(cw, mv, internalName, "java/lang/Object", fieldTypes, selfMethods);
+        ClinitRig rig = buildRig(cw, mv, internalName, "java/lang/Object", fieldTypes, staticFieldNames, selfMethods);
 
         for (AstNode m : classDecl.members()) {
             if (!(m instanceof FieldDeclaration fd)) continue;
@@ -129,7 +130,7 @@ public final class StaticInitEmitter {
      * @param selfMethods   self-method table for same-class calls
      * @return ready-to-use emitter bundle
      */
-    private @NotNull ClinitRig buildRig(@NotNull ClassWriter cw, @NotNull MethodVisitor mv, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    private @NotNull ClinitRig buildRig(@NotNull ClassWriter cw, @NotNull MethodVisitor mv, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         MethodContext ctx = new MethodContext(mv, new Scope(0), owner.typeResolver(), new MethodResolver(owner.classpathManager()), internalName, superInternal, true, selfMethods);
         ctx.enclosingOuterInternal(owner.currentEnclosingOuter());
         ctx.enclosingStaticOuter(owner.currentStaticOuter());
@@ -139,7 +140,7 @@ public final class StaticInitEmitter {
         ctx.setupLambdaSupport(cw, owner.lambdaCounter(), "<clinit>");
         ctx.setupAnonClassSupport(owner, cw, owner.anonClassCounter(), "<clinit>", owner.anonClassBytecodes(), owner.anonClassNames());
         for (Map.Entry<String, ResolvedType> e : fieldTypes.entrySet()) {
-            ctx.typeInferrer().registerField(e.getKey(), e.getValue());
+            ctx.typeInferrer().registerField(e.getKey(), e.getValue(), staticFieldNames.contains(e.getKey()));
         }
         ExpressionGenerator exprGen = new ExpressionGenerator(ctx);
         StatementGenerator stmtGen = new StatementGenerator(ctx, exprGen);

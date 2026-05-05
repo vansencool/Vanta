@@ -71,17 +71,18 @@ public final class RecordBodyGenerator {
         }
 
         Map<String, ResolvedType> fieldTypes = new HashMap<>();
+        Set<String> staticFieldNames = new HashSet<>();
         for (RecordComponent component : components) {
             fieldTypes.put(component.name(), owner.typeResolver().resolve(component.type()));
         }
         Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
-        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, selfMethods);
+        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, staticFieldNames, selfMethods);
         StringBuilder canonicalDesc = new StringBuilder("(");
         for (RecordComponent component : components)
             canonicalDesc.append(owner.typeResolver().resolveDescriptor(component.type()));
         canonicalDesc.append(")V");
         selfMethods.put("<init>:" + components.size(), new SelfMethodInfo(internalName, "<init>", canonicalDesc.toString(), false));
-        owner.methodEmitter().emitMemberMethods(cw, classDecl, internalName, "java/lang/Record", fieldTypes, selfMethods);
+        owner.methodEmitter().emitMemberMethods(cw, classDecl, internalName, "java/lang/Record", fieldTypes, staticFieldNames, selfMethods);
 
         Set<String> declaredMethods = new HashSet<>();
         for (AstNode member : classDecl.members()) {
@@ -95,7 +96,7 @@ public final class RecordBodyGenerator {
         if (!declaredMethods.contains("toString")) emitToString(cw, internalName, components);
         if (!declaredMethods.contains("hashCode")) emitHashCode(cw, internalName, components);
         if (!declaredMethods.contains("equals")) emitEquals(cw, internalName, components);
-        owner.staticInitEmitter().emitClassClinit(cw, classDecl, internalName, "java/lang/Record", fieldTypes, selfMethods);
+        owner.staticInitEmitter().emitClassClinit(cw, classDecl, internalName, "java/lang/Record", fieldTypes, staticFieldNames, selfMethods);
 
         cw.visitEnd();
         return cw.toByteArray();

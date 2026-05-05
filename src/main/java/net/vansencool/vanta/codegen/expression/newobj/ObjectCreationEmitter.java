@@ -37,9 +37,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -134,12 +136,13 @@ public final class ObjectCreationEmitter {
             for (LocalVariable cap : anonCaptures.values()) capturedTypes.put(cap.name(), cap.type());
 
             Map<String, ResolvedType> fieldTypes = new HashMap<>();
+            Set<String> staticFieldNames = new HashSet<>();
             Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
-            collectAnonFieldsAndMethods(anonCw, newExpr.anonymousClassBody(), anonInternalName, fieldTypes, selfMethods);
+            collectAnonFieldsAndMethods(anonCw, newExpr.anonymousClassBody(), anonInternalName, fieldTypes, staticFieldNames, selfMethods);
             List<String> anonSupers = new ArrayList<>();
             anonSupers.add(superInternal);
             if (interfaces != null) Collections.addAll(anonSupers, interfaces);
-            emitAnonClassBody(anonCw, newExpr.anonymousClassBody(), anonInternalName, superInternal, fieldTypes, selfMethods, needsOuter, outerDesc, ctx.classInternalName(), capturedTypes, newExpr.arguments(), anonSupers);
+            emitAnonClassBody(anonCw, newExpr.anonymousClassBody(), anonInternalName, superInternal, fieldTypes, staticFieldNames, selfMethods, needsOuter, outerDesc, ctx.classInternalName(), capturedTypes, newExpr.arguments(), anonSupers);
 
             anonCw.visitEnd();
             byte[] anonBytecode = anonCw.toByteArray();
@@ -241,10 +244,11 @@ public final class ObjectCreationEmitter {
      * @param fieldTypes   output map populated with field types
      * @param selfMethods  output map populated with self-method info
      */
-    private void collectAnonFieldsAndMethods(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    private void collectAnonFieldsAndMethods(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull String internalName, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         MethodContext ctx = exprGen.ctx();
         for (AstNode member : members) {
             if (member instanceof FieldDeclaration fieldDecl) {
+                boolean fieldIsStatic = (fieldDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
                 for (FieldDeclarator declarator : fieldDecl.declarators()) {
                     TypeNode effectiveType = fieldDecl.type();
                     if (declarator.extraArrayDimensions() > 0) {
@@ -254,6 +258,7 @@ public final class ObjectCreationEmitter {
                     FieldVisitor fv = cw.visitField(fieldDecl.modifiers(), declarator.name(), descriptor, null, null);
                     fv.visitEnd();
                     fieldTypes.put(declarator.name(), ctx.typeResolver().resolve(effectiveType));
+                    if (fieldIsStatic) staticFieldNames.add(declarator.name());
                 }
             } else if (member instanceof MethodDeclaration methodDecl) {
                 List<TypeNode> paramTypes = new ArrayList<>();
@@ -286,7 +291,7 @@ public final class ObjectCreationEmitter {
      * @param superArgs      constructor arguments passed to the super call
      * @param bridgeSupers   super + interfaces list consulted for bridge synthesis
      */
-    private void emitAnonClassBody(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, boolean needsOuter, @NotNull String outerDesc, @NotNull String outerInternal, @NotNull Map<String, ResolvedType> capturedFields, @NotNull List<Expression> superArgs, @NotNull List<String> bridgeSupers) {
+    private void emitAnonClassBody(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, boolean needsOuter, @NotNull String outerDesc, @NotNull String outerInternal, @NotNull Map<String, ResolvedType> capturedFields, @NotNull List<Expression> superArgs, @NotNull List<String> bridgeSupers) {
         MethodContext ctx = exprGen.ctx();
         boolean hasConstructor = members.stream().anyMatch(m -> m instanceof MethodDeclaration md && md.name().equals("<init>"));
         if (!hasConstructor) {
@@ -347,7 +352,7 @@ public final class ObjectCreationEmitter {
         for (AstNode member : members) {
             if (member instanceof MethodDeclaration methodDecl) {
                 if ("<clinit>".equals(methodDecl.name()) || "<init>".equals(methodDecl.name())) continue;
-                emitMethodForAnon(cw, methodDecl, internalName, superInternal, fieldTypes, selfMethods, outerInternal, capturedFields);
+                emitMethodForAnon(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, outerInternal, capturedFields);
             }
         }
         ClassGenerator cg = ctx.classGenerator();
@@ -386,7 +391,7 @@ public final class ObjectCreationEmitter {
      * @param outerInternal  outer class internal name
      * @param capturedFields captured outer locals promoted to anon fields
      */
-    private void emitMethodForAnon(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull String outerInternal, @NotNull Map<String, ResolvedType> capturedFields) {
+    private void emitMethodForAnon(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull String outerInternal, @NotNull Map<String, ResolvedType> capturedFields) {
         MethodContext outerCtx = exprGen.ctx();
         List<TypeNode> paramTypeNodes = new ArrayList<>();
         for (Parameter p : methodDecl.parameters()) {
@@ -425,7 +430,7 @@ public final class ObjectCreationEmitter {
             inner.returnType(inner.typeResolver().resolve(methodDecl.returnType()));
             inner.typeInferrer().registerSelfMethods(selfMethods);
             for (Map.Entry<String, ResolvedType> entry : fieldTypes.entrySet()) {
-                inner.typeInferrer().registerField(entry.getKey(), entry.getValue());
+                inner.typeInferrer().registerField(entry.getKey(), entry.getValue(), staticFieldNames.contains(entry.getKey()));
             }
 
             MethodGenerator gen = new MethodGenerator(inner);

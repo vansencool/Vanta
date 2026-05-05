@@ -147,19 +147,38 @@ public final class UnaryExpressionEmitter {
         if (unary.operand() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
-                if (prefix) {
-                    mv.visitIincInsn(local.index(), delta);
-                    mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                String localDesc = local.type().descriptor();
+                if ("J".equals(localDesc) || "F".equals(localDesc) || "D".equals(localDesc)) {
+                    if (prefix) {
+                        mv.visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
+                        ArithmeticOpcodes.emitDeltaPush(mv, localDesc, delta);
+                        mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
+                        mv.visitInsn(DupOpcodes.dup(localDesc));
+                        mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
+                    } else {
+                        mv.visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
+                        mv.visitInsn(DupOpcodes.dup(localDesc));
+                        ArithmeticOpcodes.emitDeltaPush(mv, localDesc, delta);
+                        mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
+                        mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
+                    }
                 } else {
-                    mv.visitVarInsn(Opcodes.ILOAD, local.index());
-                    mv.visitIincInsn(local.index(), delta);
+                    if (prefix) {
+                        mv.visitIincInsn(local.index(), delta);
+                        mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                    } else {
+                        mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                        mv.visitIincInsn(local.index(), delta);
+                    }
                 }
                 return;
             }
             ResolvedType fieldType = ctx.typeInferrer().inferField(nameExpr.name());
             if (fieldType != null) {
                 MethodResolver.ResolvedField resolved = ctx.methodResolver().resolveField(ctx.classInternalName(), nameExpr.name());
-                boolean isStatic = ctx.isStatic() || (resolved != null && resolved.isStatic());
+                boolean isStatic = (resolved != null && resolved.isStatic())
+                        || ctx.typeInferrer().isStaticField(nameExpr.name())
+                        || ctx.isStatic();
                 String desc = fieldType.descriptor();
                 if (!isStatic) mv.visitVarInsn(Opcodes.ALOAD, 0);
                 emitFieldIncDec(mv, ctx.classInternalName(), nameExpr.name(), desc, isStatic, delta, prefix);

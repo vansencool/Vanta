@@ -27,9 +27,11 @@ import org.objectweb.asm.Type;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Emits bytecode for a Java enum declaration. Handles the header, constant
@@ -89,13 +91,15 @@ public final class EnumBodyGenerator {
         valuesField.visitEnd();
 
         Map<String, ResolvedType> fieldTypes = new HashMap<>();
+        Set<String> staticFieldNames = new HashSet<>();
         Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
         ResolvedType enumType = ResolvedType.ofObject(internalName);
         for (EnumConstant constant : constants) {
             fieldTypes.put(constant.name(), enumType);
+            staticFieldNames.add(constant.name());
         }
-        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, selfMethods);
-        owner.methodEmitter().emitMemberMethods(cw, classDecl, internalName, "java/lang/Enum", fieldTypes, selfMethods);
+        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, staticFieldNames, selfMethods);
+        owner.methodEmitter().emitMemberMethods(cw, classDecl, internalName, "java/lang/Enum", fieldTypes, staticFieldNames, selfMethods);
 
         emitValues(cw, internalName, enumDesc);
         emitValueOf(cw, internalName, enumDesc);
@@ -257,6 +261,7 @@ public final class EnumBodyGenerator {
         ctorMv.visitEnd();
 
         Map<String, ResolvedType> fieldTypes = new HashMap<>();
+        Set<String> staticFieldNames = new HashSet<>();
         Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
         List<AstNode> classBody = Objects.requireNonNull(constant.classBody());
         for (AstNode m : classBody) {
@@ -271,7 +276,7 @@ public final class EnumBodyGenerator {
         for (AstNode m : classBody) {
             if (m instanceof MethodDeclaration md) {
                 ClassDeclaration syntheticDecl = new ClassDeclaration(subclassInternal, 0, null, null, new ArrayList<>(), classBody, new ArrayList<>(), TypeKind.CLASS, null, null, constant.line());
-                owner.methodEmitter().emitMethod(subCw, md, subclassInternal, enumInternal, fieldTypes, selfMethods, syntheticDecl);
+                owner.methodEmitter().emitMethod(subCw, md, subclassInternal, enumInternal, fieldTypes, staticFieldNames, selfMethods, syntheticDecl);
             }
         }
         owner.restoreOuter(savedOuter[0], savedOuter[1]);

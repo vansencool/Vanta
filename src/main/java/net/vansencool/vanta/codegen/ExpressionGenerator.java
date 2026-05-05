@@ -393,7 +393,9 @@ public final class ExpressionGenerator {
             ResolvedType fieldType = ctx.typeInferrer().inferField(nameExpr.name());
             if (fieldType != null) {
                 MethodResolver.ResolvedField resolved = ctx.methodResolver().resolveField(ctx.classInternalName(), nameExpr.name());
-                boolean isStatic = ctx.isStatic() || (resolved != null && resolved.isStatic());
+                boolean isStatic = (resolved != null && resolved.isStatic())
+                        || ctx.typeInferrer().isStaticField(nameExpr.name())
+                        || ctx.isStatic();
                 String desc = fieldType.descriptor();
                 MethodVisitor mv = ctx.mv();
                 if (isStatic) {
@@ -542,8 +544,9 @@ public final class ExpressionGenerator {
             boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
             boolean isSelfConstant = resolved == null && ctx.nestedClassConstants() != null
                     && ctx.nestedClassConstants().getOrDefault(ctx.classInternalName(), Map.of()).containsKey(name.name());
+            boolean isSelfStaticField = resolved == null && ctx.typeInferrer().isStaticField(name.name());
             String fieldOwner = resolved != null ? resolved.owner() : ctx.classInternalName();
-            if (resolvedStatic || (!hasImplicitThis) || isSelfConstant) {
+            if (resolvedStatic || isSelfStaticField || (!hasImplicitThis) || isSelfConstant) {
                 if (resolvedStatic && constantInliner.tryInline(resolved.owner(), resolved.name())) return;
                 if (isSelfConstant && constantInliner.tryInline(ctx.classInternalName(), name.name())) return;
                 ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, fieldOwner, name.name(), descriptor);

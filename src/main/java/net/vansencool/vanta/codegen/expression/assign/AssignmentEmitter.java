@@ -64,7 +64,8 @@ public final class AssignmentEmitter {
             } else {
                 String fieldDesc = exprGen.resolveFieldDescriptor(nameExpr.name());
                 boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
-                if (hasImplicitThis) {
+                boolean isSelfStaticField = ctx.typeInferrer().isStaticField(nameExpr.name());
+                if (hasImplicitThis && !isSelfStaticField) {
                     ctx.mv().visitVarInsn(Opcodes.ALOAD, 0);
                     if (!"=".equals(assignment.operator())) {
                         ctx.mv().visitInsn(Opcodes.DUP);
@@ -86,7 +87,7 @@ public final class AssignmentEmitter {
                     } else {
                         exprGen.generate(assignment.value());
                     }
-                    ctx.mv().visitInsn(Opcodes.DUP);
+                    ctx.mv().visitInsn(ResolvedType.fromDescriptor(fieldDesc).stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
                     ctx.mv().visitFieldInsn(Opcodes.PUTSTATIC, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                 }
             }
@@ -166,7 +167,8 @@ public final class AssignmentEmitter {
                 String fieldDesc = exprGen.resolveFieldDescriptor(nameExpr.name());
                 ResolvedType fieldType = ctx.typeInferrer().inferField(nameExpr.name());
                 boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
-                if (hasImplicitThis) {
+                boolean isSelfStaticField = ctx.typeInferrer().isStaticField(nameExpr.name());
+                if (hasImplicitThis && !isSelfStaticField) {
                     ctx.mv().visitVarInsn(Opcodes.ALOAD, 0);
                     if (!"=".equals(assignment.operator())) {
                         ctx.mv().visitInsn(Opcodes.DUP);

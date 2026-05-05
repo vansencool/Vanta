@@ -16,8 +16,10 @@ import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.Opcodes;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Emits bytecode for a standard Java class declaration. Handles the
@@ -90,14 +92,15 @@ public final class ClassBodyGenerator {
         }
 
         Map<String, ResolvedType> fieldTypes = new HashMap<>();
+        Set<String> staticFieldNames = new HashSet<>();
         Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
-        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, selfMethods);
+        owner.collectFieldsAndMethods(cw, classDecl, internalName, fieldTypes, staticFieldNames, selfMethods);
 
-        owner.methodEmitter().emitInSourceOrder(cw, classDecl, internalName, superInternal, fieldTypes, selfMethods);
+        owner.methodEmitter().emitInSourceOrder(cw, classDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods);
 
         boolean hasConstructor = classDecl.members().stream().anyMatch(m -> m instanceof MethodDeclaration md && md.name().equals("<init>"));
         if (!hasConstructor) {
-            owner.methodEmitter().emitDefaultConstructor(cw, internalName, superInternal, classDecl, fieldTypes, selfMethods, isNonStaticInner ? outerInternalName : null);
+            owner.methodEmitter().emitDefaultConstructor(cw, internalName, superInternal, classDecl, fieldTypes, staticFieldNames, selfMethods, isNonStaticInner ? outerInternalName : null);
         }
 
         cw.visitEnd();

@@ -39,9 +39,11 @@ import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Infers the resolved type of an expression using scope, type resolver, and classpath lookups.
@@ -54,6 +56,7 @@ public final class ExpressionTypeInferrer {
     private final @NotNull ClasspathManager classpathManager;
     private final @NotNull String classInternalName;
     private final @NotNull Map<String, ResolvedType> classFields;
+    private final @NotNull Set<String> staticFields;
     private final @NotNull IdentityHashMap<Expression, ResolvedType> inferCache = new IdentityHashMap<>();
     private @Nullable String superInternalName;
     private @Nullable Map<String, SelfMethodInfo> selfMethods;
@@ -69,6 +72,7 @@ public final class ExpressionTypeInferrer {
         this.classpathManager = classpathManager;
         this.classInternalName = classInternalName;
         this.classFields = new HashMap<>();
+        this.staticFields = new HashSet<>();
     }
 
     /**
@@ -326,12 +330,23 @@ public final class ExpressionTypeInferrer {
         classFields.put(name, type);
     }
 
+    public void registerField(@NotNull String name, @NotNull ResolvedType type, boolean isStatic) {
+        classFields.put(name, type);
+        if (isStatic) staticFields.add(name);
+        else staticFields.remove(name);
+    }
+
     public void copyFieldsFrom(@NotNull ExpressionTypeInferrer other) {
         classFields.putAll(other.classFields);
+        staticFields.addAll(other.staticFields);
     }
 
     public @Nullable ResolvedType inferField(@NotNull String name) {
         return classFields.get(name);
+    }
+
+    public boolean isStaticField(@NotNull String name) {
+        return staticFields.contains(name);
     }
 
     /**

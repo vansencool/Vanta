@@ -34,6 +34,7 @@ import org.objectweb.asm.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -103,7 +104,7 @@ public final class MethodEmitter {
      * @param fieldTypes    resolved types of declared fields
      * @param selfMethods   self-method table for same-class calls
      */
-    public void emitMemberMethods(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    public void emitMemberMethods(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         boolean isRecord = classDecl.kind() == TypeKind.RECORD;
         int recordComponentCount = isRecord && classDecl.recordComponents() != null ? classDecl.recordComponents().size() : 0;
         for (AstNode member : classDecl.members()) {
@@ -112,7 +113,7 @@ public final class MethodEmitter {
                 if ("<iinit>".equals(methodDecl.name())) continue;
                 if (isRecord && "<init>".equals(methodDecl.name()) && methodDecl.parameters().size() == recordComponentCount)
                     continue;
-                emitMethod(cw, methodDecl, internalName, superInternal, fieldTypes, selfMethods, classDecl);
+                emitMethod(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
             }
         }
         owner.bridgeMethodEmitter().emit(cw, classDecl, internalName);
@@ -132,7 +133,7 @@ public final class MethodEmitter {
      * @param fieldTypes    resolved types of declared fields
      * @param selfMethods   self-method table for same-class calls
      */
-    public void emitInSourceOrder(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods) {
+    public void emitInSourceOrder(@NotNull ClassWriter cw, @NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods) {
         boolean hasStaticInit = owner.hasStaticFieldInitOrBlock(classDecl);
 
         RecordingMethodVisitor clinitBuffer = null;
@@ -151,7 +152,7 @@ public final class MethodEmitter {
             clinitCtx.setupLambdaSupport(cw, owner.lambdaCounter(), "<clinit>");
             clinitCtx.setupAnonClassSupport(owner, cw, owner.anonClassCounter(), "<clinit>", owner.anonClassBytecodes(), owner.anonClassNames());
             for (Map.Entry<String, ResolvedType> e : fieldTypes.entrySet()) {
-                clinitCtx.typeInferrer().registerField(e.getKey(), e.getValue());
+                clinitCtx.typeInferrer().registerField(e.getKey(), e.getValue(), staticFieldNames.contains(e.getKey()));
             }
             clinitExpr = new ExpressionGenerator(clinitCtx);
             clinitStmt = new StatementGenerator(clinitCtx, clinitExpr);
@@ -200,7 +201,7 @@ public final class MethodEmitter {
                 deferredMethods.add(md);
             }
         }
-        runMethodBatch(cw, deferredMethods, internalName, superInternal, fieldTypes, selfMethods, classDecl);
+        runMethodBatch(cw, deferredMethods, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
 
         if (clinitBuffer != null) {
             clinitBuffer.visitInsn(Opcodes.RETURN);
@@ -220,11 +221,11 @@ public final class MethodEmitter {
      * inside {@link #emitMethod} are protected by an internal lock so parallel
      * execution remains byte-identical to serial.
      */
-    private void runMethodBatch(@NotNull ClassWriter cw, @NotNull List<MethodDeclaration> methods, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull ClassDeclaration classDecl) {
+    private void runMethodBatch(@NotNull ClassWriter cw, @NotNull List<MethodDeclaration> methods, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull ClassDeclaration classDecl) {
         int workers = MethodParallelism.workers();
         if (workers <= 1 || methods.size() <= 1) {
             for (MethodDeclaration md : methods)
-                emitMethod(cw, md, internalName, superInternal, fieldTypes, selfMethods, classDecl);
+                emitMethod(cw, md, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
             return;
         }
         Object scopeSnapshot = owner.typeResolver().captureScope();
@@ -245,7 +246,7 @@ public final class MethodEmitter {
                     try {
                         for (int i = from; i < to; i++) {
                             if (failure.get() != null) return;
-                            emitMethod(cw, methods.get(i), internalName, superInternal, fieldTypes, selfMethods, classDecl);
+                            emitMethod(cw, methods.get(i), internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
                             orderedDeferred.put(i, pendingMethods.get());
                             pendingMethods.set(new ArrayList<>());
                         }
@@ -283,7 +284,7 @@ public final class MethodEmitter {
      * deferred flushing (under {@link #cwLock} or into the parallel batch's
      * pending list).
      */
-    public void emitMethod(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull ClassDeclaration classDecl) {
+    public void emitMethod(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull ClassDeclaration classDecl) {
         if (methodDecl.typeParameters() != null && !methodDecl.typeParameters().isEmpty())
             owner.typeResolver().registerTypeParameters(methodDecl.typeParameters());
         int paramCount = methodDecl.parameters().size();
@@ -345,7 +346,7 @@ public final class MethodEmitter {
             ctx.returnType(resolvedReturnType);
             ctx.typeInferrer().registerSelfMethods(selfMethods);
             for (Map.Entry<String, ResolvedType> entry : fieldTypes.entrySet()) {
-                ctx.typeInferrer().registerField(entry.getKey(), entry.getValue());
+                ctx.typeInferrer().registerField(entry.getKey(), entry.getValue(), staticFieldNames.contains(entry.getKey()));
             }
 
             Label methodStart = new Label();
@@ -435,7 +436,7 @@ public final class MethodEmitter {
      * interface members where source-declared flags need combining with
      * {@code ACC_PUBLIC}/{@code ACC_ABSTRACT}.
      */
-    public void emitMethodWithAccess(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, int access) {
+    public void emitMethodWithAccess(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String classInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, int access) {
         if (methodDecl.typeParameters() != null && !methodDecl.typeParameters().isEmpty())
             owner.typeResolver().registerTypeParameters(methodDecl.typeParameters());
         List<TypeNode> paramTypeNodes = new ArrayList<>();
@@ -467,7 +468,7 @@ public final class MethodEmitter {
             ctx.setupAnonClassSupport(owner, cw, owner.anonClassCounter(), methodDecl.name(), owner.anonClassBytecodes(), owner.anonClassNames());
             ctx.returnType(owner.typeResolver().resolve(methodDecl.returnType()));
             for (Map.Entry<String, ResolvedType> entry : fieldTypes.entrySet()) {
-                ctx.typeInferrer().registerField(entry.getKey(), entry.getValue());
+                ctx.typeInferrer().registerField(entry.getKey(), entry.getValue(), staticFieldNames.contains(entry.getKey()));
             }
             MethodGenerator gen = new MethodGenerator(ctx);
             if ("<init>".equals(methodDecl.name()) && !startsWithConstructorCall(methodDecl)) {
@@ -488,7 +489,7 @@ public final class MethodEmitter {
      * initialiser and non-constant instance-field initializers for classes
      * that don't author their own constructor.
      */
-    public void emitDefaultConstructor(@NotNull ClassWriter cw, @NotNull String classInternal, @NotNull String superInternal, @NotNull ClassDeclaration classDecl, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Map<String, SelfMethodInfo> selfMethods, @Nullable String enclosingOuterInternal) {
+    public void emitDefaultConstructor(@NotNull ClassWriter cw, @NotNull String classInternal, @NotNull String superInternal, @NotNull ClassDeclaration classDecl, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @Nullable String enclosingOuterInternal) {
         String desc = enclosingOuterInternal != null ? "(L" + enclosingOuterInternal + ";)V" : "()V";
         MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", desc, null, null);
         mv.visitCode();
@@ -517,7 +518,7 @@ public final class MethodEmitter {
         ctx.classGenerator(owner);
         ctx.setupLambdaSupport(cw, owner.lambdaCounter(), "<init>");
         for (Map.Entry<String, ResolvedType> entry : fieldTypes.entrySet())
-            ctx.typeInferrer().registerField(entry.getKey(), entry.getValue());
+            ctx.typeInferrer().registerField(entry.getKey(), entry.getValue(), staticFieldNames.contains(entry.getKey()));
         emitInstanceFieldInitializers(classDecl, classInternal, new ExpressionGenerator(ctx), mv);
         mv.visitInsn(Opcodes.RETURN);
         Label endLabel = new Label();

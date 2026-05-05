@@ -18,8 +18,10 @@ import org.objectweb.asm.Opcodes;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Emits the bytecode for a Java interface declaration. Interfaces lower to an
@@ -65,6 +67,7 @@ public final class InterfaceBodyGenerator {
         owner.classHeaderEmitter().emit(cw, classDecl, internalName, access, signature, "java/lang/Object", interfaces, outerInternalName, false, owner.nestHostInternal(), owner.nestMemberInternals());
 
         Map<String, ResolvedType> fieldTypes = new HashMap<>();
+        Set<String> staticFieldNames = new HashSet<>();
         Map<String, SelfMethodInfo> selfMethods = new HashMap<>();
 
         for (AstNode member : classDecl.members()) {
@@ -80,6 +83,7 @@ public final class InterfaceBodyGenerator {
                     FieldVisitor fv = cw.visitField(fieldMods, declarator.name(), descriptor, null, constantValue);
                     fv.visitEnd();
                     fieldTypes.put(declarator.name(), owner.typeResolver().resolve(effectiveType));
+                    staticFieldNames.add(declarator.name());
                 }
             } else if (member instanceof MethodDeclaration methodDecl) {
                 if (methodDecl.typeParameters() != null && !methodDecl.typeParameters().isEmpty())
@@ -101,11 +105,11 @@ public final class InterfaceBodyGenerator {
                 if (methodDecl.body() == null) {
                     methodAccess |= Opcodes.ACC_ABSTRACT;
                 }
-                owner.methodEmitter().emitMethodWithAccess(cw, methodDecl, internalName, fieldTypes, selfMethods, methodAccess);
+                owner.methodEmitter().emitMethodWithAccess(cw, methodDecl, internalName, fieldTypes, staticFieldNames, selfMethods, methodAccess);
             }
         }
 
-        owner.staticInitEmitter().emitInterfaceClinit(cw, classDecl, internalName, fieldTypes, selfMethods);
+        owner.staticInitEmitter().emitInterfaceClinit(cw, classDecl, internalName, fieldTypes, staticFieldNames, selfMethods);
 
         cw.visitEnd();
         return cw.toByteArray();
