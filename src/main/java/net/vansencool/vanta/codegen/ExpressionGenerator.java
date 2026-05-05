@@ -375,9 +375,19 @@ public final class ExpressionGenerator {
             return;
         }
         if (expr instanceof UnaryExpression unary && ("++".equals(unary.operator()) || "--".equals(unary.operator())) && unary.operand() instanceof NameExpression nameExpr) {
+            int delta = "++".equals(unary.operator()) ? 1 : -1;
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
-                ctx.mv().visitIincInsn(local.index(), "++".equals(unary.operator()) ? 1 : -1);
+                String localDesc = local.type().descriptor();
+                MethodVisitor mv = ctx.mv();
+                if ("J".equals(localDesc) || "F".equals(localDesc) || "D".equals(localDesc)) {
+                    mv.visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
+                    ArithmeticOpcodes.emitDeltaPush(mv, localDesc, delta);
+                    mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
+                    mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
+                } else {
+                    mv.visitIincInsn(local.index(), delta);
+                }
                 return;
             }
             ResolvedType fieldType = ctx.typeInferrer().inferField(nameExpr.name());
@@ -388,15 +398,17 @@ public final class ExpressionGenerator {
                 MethodVisitor mv = ctx.mv();
                 if (isStatic) {
                     mv.visitFieldInsn(Opcodes.GETSTATIC, ctx.classInternalName(), nameExpr.name(), desc);
-                    mv.visitInsn(Opcodes.ICONST_1);
-                    mv.visitInsn("++".equals(unary.operator()) ? Opcodes.IADD : Opcodes.ISUB);
+                    ArithmeticOpcodes.emitDeltaPush(mv, desc, delta);
+                    mv.visitInsn(ArithmeticOpcodes.addOrSub(desc, delta));
+                    NumericCoercion.emitNarrowForSubIntDesc(mv, desc);
                     mv.visitFieldInsn(Opcodes.PUTSTATIC, ctx.classInternalName(), nameExpr.name(), desc);
                 } else {
                     mv.visitVarInsn(Opcodes.ALOAD, 0);
                     mv.visitInsn(Opcodes.DUP);
                     mv.visitFieldInsn(Opcodes.GETFIELD, ctx.classInternalName(), nameExpr.name(), desc);
-                    mv.visitInsn(Opcodes.ICONST_1);
-                    mv.visitInsn("++".equals(unary.operator()) ? Opcodes.IADD : Opcodes.ISUB);
+                    ArithmeticOpcodes.emitDeltaPush(mv, desc, delta);
+                    mv.visitInsn(ArithmeticOpcodes.addOrSub(desc, delta));
+                    NumericCoercion.emitNarrowForSubIntDesc(mv, desc);
                     mv.visitFieldInsn(Opcodes.PUTFIELD, ctx.classInternalName(), nameExpr.name(), desc);
                 }
                 return;
