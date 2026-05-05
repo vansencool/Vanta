@@ -4,6 +4,7 @@ import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.codegen.expression.coercion.NumericCoercion;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
 import net.vansencool.vanta.lexer.token.TokenType;
@@ -56,6 +57,7 @@ public final class AssignmentEmitter {
                 } else {
                     ctx.mv().visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), local.type(), assignment.value());
                     emitCompoundAssignOp(assignment.operator(), local.type().descriptor());
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), local.type().descriptor());
                 }
@@ -63,6 +65,7 @@ public final class AssignmentEmitter {
                 ctx.mv().visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
             } else {
                 String fieldDesc = exprGen.resolveFieldDescriptor(nameExpr.name());
+                ResolvedType fieldType = ResolvedType.fromDescriptor(fieldDesc);
                 boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
                 boolean isSelfStaticField = ctx.typeInferrer().isStaticField(nameExpr.name());
                 if (hasImplicitThis && !isSelfStaticField) {
@@ -71,6 +74,7 @@ public final class AssignmentEmitter {
                         ctx.mv().visitInsn(Opcodes.DUP);
                         ctx.mv().visitFieldInsn(Opcodes.GETFIELD, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                         exprGen.generate(assignment.value());
+                        adaptCompoundRhs(assignment.operator(), fieldType, assignment.value());
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
@@ -82,12 +86,13 @@ public final class AssignmentEmitter {
                     if (!"=".equals(assignment.operator())) {
                         ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                         exprGen.generate(assignment.value());
+                        adaptCompoundRhs(assignment.operator(), fieldType, assignment.value());
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
                         exprGen.generate(assignment.value());
                     }
-                    ctx.mv().visitInsn(ResolvedType.fromDescriptor(fieldDesc).stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
+                    ctx.mv().visitInsn(fieldType.stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
                     ctx.mv().visitFieldInsn(Opcodes.PUTSTATIC, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                 }
             }
@@ -96,21 +101,23 @@ public final class AssignmentEmitter {
             if (staticResolved != null && staticResolved.isStatic()) {
                 String fieldDesc = staticResolved.descriptor();
                 String fieldOwner = staticResolved.owner();
+                ResolvedType fieldType = ResolvedType.fromDescriptor(fieldDesc);
                 if ("=".equals(assignment.operator())) {
                     exprGen.generate(assignment.value());
-                    ResolvedType targetType = ResolvedType.fromDescriptor(fieldDesc);
-                    exprGen.numericCoercion().adaptForStore(targetType, assignment.value());
+                    exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                 } else {
                     ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, fieldOwner, staticResolved.name(), fieldDesc);
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), fieldType, assignment.value());
                     emitCompoundAssignOp(assignment.operator(), fieldDesc);
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                 }
-                ctx.mv().visitInsn(ResolvedType.fromDescriptor(fieldDesc).stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
+                ctx.mv().visitInsn(fieldType.stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
                 ctx.mv().visitFieldInsn(Opcodes.PUTSTATIC, fieldOwner, staticResolved.name(), fieldDesc);
             } else {
                 ResolvedType targetType = ctx.typeInferrer().infer(fieldAccess);
                 String fieldDesc = targetType != null ? targetType.descriptor() : exprGen.resolveFieldDescriptor(fieldAccess.fieldName());
+                ResolvedType fieldType = targetType != null ? targetType : ResolvedType.fromDescriptor(fieldDesc);
                 String fieldOwner = ctx.classInternalName();
                 ResolvedType recvType = ctx.typeInferrer().infer(fieldAccess.target());
                 if (recvType != null && recvType.internalName() != null) fieldOwner = recvType.internalName();
@@ -122,6 +129,7 @@ public final class AssignmentEmitter {
                     ctx.mv().visitInsn(Opcodes.DUP);
                     ctx.mv().visitFieldInsn(Opcodes.GETFIELD, fieldOwner, fieldAccess.fieldName(), fieldDesc);
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), fieldType, assignment.value());
                     emitCompoundAssignOp(assignment.operator(), fieldDesc);
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                 }
@@ -159,6 +167,7 @@ public final class AssignmentEmitter {
                 } else {
                     ctx.mv().visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), local.type(), assignment.value());
                     emitCompoundAssignOp(assignment.operator(), local.type().descriptor());
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), local.type().descriptor());
                 }
@@ -166,6 +175,7 @@ public final class AssignmentEmitter {
             } else {
                 String fieldDesc = exprGen.resolveFieldDescriptor(nameExpr.name());
                 ResolvedType fieldType = ctx.typeInferrer().inferField(nameExpr.name());
+                ResolvedType compoundLhsType = fieldType != null ? fieldType : ResolvedType.fromDescriptor(fieldDesc);
                 boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
                 boolean isSelfStaticField = ctx.typeInferrer().isStaticField(nameExpr.name());
                 if (hasImplicitThis && !isSelfStaticField) {
@@ -174,6 +184,7 @@ public final class AssignmentEmitter {
                         ctx.mv().visitInsn(Opcodes.DUP);
                         ctx.mv().visitFieldInsn(Opcodes.GETFIELD, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                         exprGen.generate(assignment.value());
+                        adaptCompoundRhs(assignment.operator(), compoundLhsType, assignment.value());
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
@@ -185,6 +196,7 @@ public final class AssignmentEmitter {
                     if (!"=".equals(assignment.operator())) {
                         ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, ctx.classInternalName(), nameExpr.name(), fieldDesc);
                         exprGen.generate(assignment.value());
+                        adaptCompoundRhs(assignment.operator(), compoundLhsType, assignment.value());
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
@@ -206,6 +218,7 @@ public final class AssignmentEmitter {
                 } else {
                     ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, fieldOwner, staticResolved.name(), fieldDesc);
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), fieldType, assignment.value());
                     emitCompoundAssignOp(assignment.operator(), fieldDesc);
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                 }
@@ -213,6 +226,7 @@ public final class AssignmentEmitter {
             } else {
                 ResolvedType targetType = ctx.typeInferrer().infer(fieldAccess);
                 String fieldDesc = targetType != null ? targetType.descriptor() : exprGen.resolveFieldDescriptor(fieldAccess.fieldName());
+                ResolvedType compoundLhsType = targetType != null ? targetType : ResolvedType.fromDescriptor(fieldDesc);
                 String fieldOwner = ctx.classInternalName();
                 ResolvedType recvType = ctx.typeInferrer().infer(fieldAccess.target());
                 if (recvType != null && recvType.internalName() != null) fieldOwner = recvType.internalName();
@@ -224,6 +238,7 @@ public final class AssignmentEmitter {
                     ctx.mv().visitInsn(Opcodes.DUP);
                     ctx.mv().visitFieldInsn(Opcodes.GETFIELD, fieldOwner, fieldAccess.fieldName(), fieldDesc);
                     exprGen.generate(assignment.value());
+                    adaptCompoundRhs(assignment.operator(), compoundLhsType, assignment.value());
                     emitCompoundAssignOp(assignment.operator(), fieldDesc);
                     NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                 }
@@ -242,6 +257,7 @@ public final class AssignmentEmitter {
                 ctx.mv().visitInsn(Opcodes.DUP2);
                 ctx.mv().visitInsn(exprGen.arrayEmitter().arrayLoadOpcodeFor(arrayAccess));
                 exprGen.generate(assignment.value());
+                if (elemType != null) adaptCompoundRhs(assignment.operator(), elemType, assignment.value());
                 emitCompoundAssignOp(assignment.operator(), elemType != null ? elemType.descriptor() : "I");
             }
             ctx.mv().visitInsn(exprGen.arrayEmitter().arrayStoreOpcodeFor(arrayAccess));
@@ -255,6 +271,27 @@ public final class AssignmentEmitter {
      * @param operator compound operator (e.g. {@code +=})
      * @param typeDesc JVM type descriptor driving opcode selection
      */
+    /**
+     * Coerces the RHS of a compound assignment to match the LHS type. Unlike
+     * {@code adaptForStore} this is unconditional for arithmetic operators:
+     * a same-typed compound op needs both operands at LHS width even when the
+     * source-level RHS is an int literal that {@code adaptForStore} would
+     * skip. Shift operators keep an {@code int} RHS regardless of LHS width.
+     */
+    private void adaptCompoundRhs(@NotNull String operator, @NotNull ResolvedType lhsType, @NotNull Expression value) {
+        if ("<<=".equals(operator) || ">>=".equals(operator) || ">>>=".equals(operator)) return;
+        String lhsDesc = lhsType.descriptor();
+        if ("+=".equals(operator) && "Ljava/lang/String;".equals(lhsDesc)) return;
+        if (!"J".equals(lhsDesc) && !"F".equals(lhsDesc) && !"D".equals(lhsDesc)) return;
+        ResolvedType actual = exprGen.ctx().typeInferrer().infer(value);
+        if (actual == null) return;
+        if (actual.isPrimitive() && !actual.descriptor().equals(lhsDesc)) {
+            PrimitiveConversionEmitter.emitPrimitiveWidening(exprGen.ctx().mv(), actual.descriptor(), lhsDesc);
+        } else {
+            exprGen.numericCoercion().adaptForStore(lhsType, value);
+        }
+    }
+
     private void emitCompoundAssignOp(@NotNull String operator, @NotNull String typeDesc) {
         MethodVisitor mv = exprGen.ctx().mv();
         if ("+=".equals(operator) && "Ljava/lang/String;".equals(typeDesc)) {
