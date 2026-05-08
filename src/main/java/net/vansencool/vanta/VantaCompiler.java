@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -129,21 +130,84 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     }
 
     /**
-     * Compiles Java source code into bytecode.
-     * Returns a map of class internal names to their compiled bytecode.
-     * A single source file may produce multiple classes (e.g., inner classes, anonymous classes).
-     *
-     * @param source     the Java source code
-     * @param sourceFile the source file name for debug info, or null
-     * @return map from class internal name to bytecode bytes
+     * Lexes and parses a single source file into a {@link CompilationUnit}.
+     */
+    public @NotNull CompilationUnit parse(@NotNull String source, @Nullable String sourceFile) {
+        List<Token> tokens = new Lexer(source, sourceFile).tokenize();
+        return new Parser(tokens, source, sourceFile).parse();
+    }
+
+    /**
+     * Lexes and parses a batch of source files. The returned map preserves
+     * the input iteration order so downstream phases see files in the same
+     * order they were submitted.
+     */
+    public @NotNull Map<String, CompilationUnit> parseAll(@NotNull Map<String, String> sources) {
+        Map<String, CompilationUnit> parsed = new LinkedHashMap<>(sources.size());
+        for (Map.Entry<String, String> entry : sources.entrySet()) {
+            parsed.put(entry.getKey(), parse(entry.getValue(), entry.getKey()));
+        }
+        return parsed;
+    }
+
+    /**
+     * Parallel variant of {@link #parseAll}. Each file is lexed and parsed on
+     * {@code pool}; the returned map preserves input iteration order.
+     */
+    public @NotNull Map<String, CompilationUnit> parseAllParallel(@NotNull Map<String, String> sources, @NotNull ExecutorService pool) {
+        int n = sources.size();
+        if (n <= 16) return parseAll(sources);
+        List<Map.Entry<String, String>> entries = new ArrayList<>(sources.entrySet());
+        CompilationUnit[] results = new CompilationUnit[n];
+        int workers = 8;
+        int batchSize = Math.max(8, (int) Math.ceil((double) n / workers));
+        List<Future<?>> futures = new ArrayList<>(workers);
+        AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
+        for (int start = 0; start < n; start += batchSize) {
+            int from = start;
+            int to = Math.min(start + batchSize, n);
+            futures.add(pool.submit(() -> {
+                if (firstFailure.get() != null) return;
+                try {
+                    for (int i = from; i < to; i++) {
+                        Map.Entry<String, String> entry = entries.get(i);
+                        results[i] = parse(entry.getValue(), entry.getKey());
+                    }
+                } catch (RuntimeException e) {
+                    firstFailure.compareAndSet(null, e);
+                }
+            }));
+        }
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (Exception ignored) {
+            }
+        }
+        if (firstFailure.get() != null) throw firstFailure.get();
+        Map<String, CompilationUnit> parsed = new LinkedHashMap<>(n);
+        for (int i = 0; i < n; i++) parsed.put(entries.get(i).getKey(), results[i]);
+        return parsed;
+    }
+
+    /**
+     * Compiles a single source file. A single file may produce multiple classes
+     * when it declares inner or anonymous classes; each lands in the result map
+     * keyed by its internal name.
      */
     public @NotNull Map<String, byte[]> compile(@NotNull String source, @Nullable String sourceFile) {
-        try {
-            Lexer lexer = new Lexer(source, sourceFile);
-            List<Token> tokens = lexer.tokenize();
-            Parser parser = new Parser(tokens, source, sourceFile);
-            CompilationUnit cu = parser.parse();
+        return compile(parse(source, sourceFile), source, sourceFile);
+    }
 
+    /**
+     * Compiles an already parsed {@link CompilationUnit}. Use this when the AST
+     * has been produced separately (for example by {@link #parseAll}) so the
+     * source is not re-parsed.
+     *
+     * @param source the original source text, retained for diagnostic rendering
+     */
+    public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile) {
+        try {
             TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
             ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile);
 
@@ -191,126 +255,30 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * @return map from class internal name to bytecode bytes
      */
     public @NotNull Map<String, byte[]> compileAll(@NotNull Map<String, String> sources) {
-        if (classpathManager.markSkeletonsRegistered()) {
-            registerSignatureSkeletons(sources);
-        }
+        Map<String, CompilationUnit> parsed = parseAll(sources);
+        registerSignatureSkeletons(parsed);
         Map<String, byte[]> result = new HashMap<>();
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             String path = entry.getKey();
             String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-            result.putAll(compile(entry.getValue(), fileName));
+            result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
         }
         return result;
     }
 
     /**
-     * Parses {@code sources} and registers a signature-only skeleton class
-     * for every declared type so subsequent {@link #compile} calls resolve
-     * cross-file references against real classpath entries instead of
-     * silently falling back to {@code Object}. Safe to call once before a
-     * batch of per-file {@link #compile} invocations when a driver cannot
-     * use {@link #compileAll} directly.
+     * Registers a signature only skeleton class for every declared type in
+     * {@code parsed} so subsequent {@link #compile} calls resolve cross file
+     * references against real classpath entries instead of silently falling
+     * back to {@code Object}.
      */
-    public void registerSignatureSkeletons(@NotNull Map<String, String> sources) {
+    public void registerSignatureSkeletons(@NotNull Map<String, CompilationUnit> parsed) {
         SkeletonGenerator skeletonGen = new SkeletonGenerator();
-        List<CompilationUnit> parsed = new ArrayList<>(sources.size());
-        for (Map.Entry<String, String> entry : sources.entrySet()) {
-            try {
-                List<Token> tokens = new Lexer(entry.getValue(), entry.getKey()).tokenize();
-                CompilationUnit cu = new Parser(tokens, entry.getValue(), entry.getKey()).parse();
-                skeletonGen.registerBatchTypes(cu);
-                parsed.add(cu);
-            } catch (CompilationException ignored) {
-                // Let the full compile pass surface the error with a proper message.
-            }
-        }
-        for (CompilationUnit cu : parsed) {
+        for (CompilationUnit cu : parsed.values()) skeletonGen.registerBatchTypes(cu);
+        for (CompilationUnit cu : parsed.values()) {
             Map<String, byte[]> skeletons = skeletonGen.emit(cu);
             for (Map.Entry<String, byte[]> sk : skeletons.entrySet()) {
                 classpathManager.registerInMemoryClass(sk.getKey(), sk.getValue());
-            }
-        }
-    }
-
-    /**
-     * Parallel variant of {@link #registerSignatureSkeletons}. Parsing + skeleton
-     * emission are independent per file, so the whole pre-pass scales with the
-     * worker count instead of serialising on a single thread.
-     */
-    public void registerSignatureSkeletonsParallel(@NotNull Map<String, String> sources, int workers) {
-        if (sources.size() <= 1 || workers <= 1) {
-            registerSignatureSkeletons(sources);
-            return;
-        }
-        SkeletonGenerator skeletonGen = new SkeletonGenerator();
-        List<Map.Entry<String, String>> entries = new ArrayList<>(sources.entrySet());
-        CompilationUnit[] parsedArr = new CompilationUnit[entries.size()];
-        ExecutorService parsePool = Executors.newFixedThreadPool(workers, r -> {
-            Thread t = new Thread(r, "Vanta-Skel-Parse");
-            t.setDaemon(true);
-            return t;
-        });
-        try {
-            List<Future<?>> parseFutures = new ArrayList<>(entries.size());
-            for (int i = 0; i < entries.size(); i++) {
-                final int idx = i;
-                parseFutures.add(parsePool.submit(() -> {
-                    try {
-                        List<Token> tokens = new Lexer(entries.get(idx).getValue(), entries.get(idx).getKey()).tokenize();
-                        parsedArr[idx] = new Parser(tokens, entries.get(idx).getValue(), entries.get(idx).getKey()).parse();
-                    } catch (CompilationException ignored) {
-                    }
-                }));
-            }
-            for (Future<?> f : parseFutures) {
-                try {
-                    f.get();
-                } catch (Exception ignored) {
-                }
-            }
-        } finally {
-            parsePool.shutdown();
-        }
-        for (CompilationUnit cu : parsedArr) if (cu != null) skeletonGen.registerBatchTypes(cu);
-        byte[][][] emitted = new byte[parsedArr.length][][];
-        String[][] emittedNames = new String[parsedArr.length][];
-        ExecutorService emitPool = Executors.newFixedThreadPool(workers, r -> {
-            Thread t = new Thread(r, "Vanta-Skel-Emit");
-            t.setDaemon(true);
-            return t;
-        });
-        try {
-            List<Future<?>> emitFutures = new ArrayList<>(parsedArr.length);
-            for (int i = 0; i < parsedArr.length; i++) {
-                if (parsedArr[i] == null) continue;
-                final int idx = i;
-                emitFutures.add(emitPool.submit(() -> {
-                    Map<String, byte[]> skeletons = skeletonGen.emit(parsedArr[idx]);
-                    String[] names = new String[skeletons.size()];
-                    byte[][] bytes = new byte[skeletons.size()][];
-                    int k = 0;
-                    for (Map.Entry<String, byte[]> sk : skeletons.entrySet()) {
-                        names[k] = sk.getKey();
-                        bytes[k] = sk.getValue();
-                        k++;
-                    }
-                    emittedNames[idx] = names;
-                    emitted[idx] = bytes;
-                }));
-            }
-            for (Future<?> f : emitFutures) {
-                try {
-                    f.get();
-                } catch (Exception ignored) {
-                }
-            }
-        } finally {
-            emitPool.shutdown();
-        }
-        for (int i = 0; i < emitted.length; i++) {
-            if (emitted[i] == null) continue;
-            for (int j = 0; j < emitted[i].length; j++) {
-                classpathManager.registerInMemoryClass(emittedNames[i][j], emitted[i][j]);
             }
         }
     }
@@ -337,14 +305,16 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 MethodParallelism.clear();
             }
         }
-        if (classpathManager.markSkeletonsRegistered()) {
-            registerSignatureSkeletonsParallel(sources, fileWorkers);
-        }
+        ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
+        long t0 = System.nanoTime();
+        Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
+        long t1 = System.nanoTime();
+        registerSignatureSkeletons(parsed);
+        long t2 = System.nanoTime();
         MethodParallelism.current(mode.methodWorkers());
         try {
             Map<String, byte[]> result = new ConcurrentHashMap<>();
             AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
-            ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
             List<Map.Entry<String, String>> ordered = new ArrayList<>(sources.entrySet());
             ordered.sort(new LongestFirst());
             List<Future<?>> futures = new ArrayList<>(sources.size());
@@ -354,7 +324,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                     String path = entry.getKey();
                     String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
                     try {
-                        result.putAll(compile(entry.getValue(), fileName));
+                        result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
                     } catch (RuntimeException e) {
                         firstFailure.compareAndSet(null, e);
                     }
@@ -366,6 +336,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 } catch (Exception ignored) {
                 }
             }
+            long t3 = System.nanoTime();
+            System.err.printf("[Vanta-time] parse=%.2fms skel=%.2fms codegen=%.2fms total=%.2fms files=%d%n",
+                    (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, (t3 - t0) / 1e6, sources.size());
             if (firstFailure.get() != null) throw firstFailure.get();
             return result;
         } finally {
@@ -384,9 +357,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         if (sources.size() <= 1) return compileAll(sources);
         int fileWorkers = Math.min(Math.min(maxThreads, 8), sources.size());
         if (fileWorkers <= 1) return compileAll(sources);
-        if (classpathManager.markSkeletonsRegistered()) {
-            registerSignatureSkeletonsParallel(sources, fileWorkers);
-        }
+        ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
+        Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
+        registerSignatureSkeletons(parsed);
         int[] lengths = sources.values().stream().mapToInt(String::length).sorted().toArray();
         int median = lengths[lengths.length / 2];
         int p95 = lengths[Math.min(lengths.length - 1, (int) (lengths.length * 0.95))];
@@ -407,7 +380,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         }
         Map<String, byte[]> result = new ConcurrentHashMap<>();
         AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
-        ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
         List<Map.Entry<String, String>> ordered = new ArrayList<>(sources.entrySet());
         ordered.sort(new LongestFirst());
         List<Future<?>> futures = new ArrayList<>(sources.size());
@@ -419,7 +391,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
                 if (mw > 1) MethodParallelism.current(mw);
                 try {
-                    result.putAll(compile(entry.getValue(), fileName));
+                    result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
                 } catch (RuntimeException e) {
                     firstFailure.compareAndSet(null, e);
                 } finally {

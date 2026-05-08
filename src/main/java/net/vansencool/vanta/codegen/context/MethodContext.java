@@ -42,7 +42,6 @@ public final class MethodContext {
     private final @NotNull List<PendingLocal> pendingLocals = new ArrayList<>();
     private final @NotNull List<Runnable> pendingFinallyEmitters = new ArrayList<>();
     private final @NotNull Deque<ResolvedType> switchExpectedStack = new ArrayDeque<>();
-    private final @NotNull Object anonClassLock = new Object();
     private int selfMethodsOverloadState;
     private boolean reachable;
     private @Nullable ClassWriter classWriter;
@@ -330,7 +329,7 @@ public final class MethodContext {
     }
 
     public void addAnonClass(byte[] bytecode, @NotNull String name) {
-        synchronized (anonClassLock) {
+        synchronized (anonClassBytecodes) {
             anonClassBytecodes.add(bytecode);
             anonClassNames.add(name);
         }

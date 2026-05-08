@@ -21,7 +21,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -37,7 +36,6 @@ public final class ClasspathManager {
     private final @NotNull Map<String, ClassInfo> cache;
     private final @NotNull Map<String, Class<?>> classCache = new ConcurrentHashMap<>();
     private final @NotNull Set<String> missCache = ConcurrentHashMap.newKeySet();
-    private final @NotNull AtomicBoolean skeletonsRegistered = new AtomicBoolean(false);
     private final @NotNull Map<String, byte[]> inMemoryClasses = new ConcurrentHashMap<>();
     private final @NotNull Map<Class<?>, Method[]> methodsCache = new ConcurrentHashMap<>();
     private final @NotNull Map<Class<?>, Map<String, Method[]>> methodsByNameCache = new ConcurrentHashMap<>();
@@ -455,17 +453,6 @@ public final class ClasspathManager {
         }
         asmInfoCache.put(internalName, info);
         return info;
-    }
-
-    /**
-     * Atomically claims the skeleton-registration slot for this classpath manager.
-     * Returns {@code true} the first time it is called (so the caller should do
-     * the skeleton emit + register) and {@code false} on every subsequent call,
-     * letting the warm benchmark path skip the several-millisecond skeleton
-     * pre-pass on iterations 2..N.
-     */
-    public boolean markSkeletonsRegistered() {
-        return skeletonsRegistered.compareAndSet(false, true);
     }
 
     /**

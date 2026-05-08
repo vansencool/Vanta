@@ -118,10 +118,10 @@ Benchmark results via JMH on modern hardware.
 
 | Scenario | javac | Vanta | Vanta (parallel) | Speedup |
 |---|---|---|---|---|
-| **Gson (warm)** | 91.69 ms | 15.59 ms | 2.55 ms | **~5.9x / ~36x parallel** |
-| **Gson (cold)** | 707.93 ms | 298.09 ms | 236.65 ms | **~2.4x / ~3.0x parallel** |
-| **Self-compilation (warm)** | 182.95 ms | 31.64 ms | 4.98 ms | **~5.8x / ~37x parallel** |
-| **Self-compilation (cold)** | 989.52 ms | 407.91 ms | 324.38 ms | **~2.4x / ~3.1x parallel** |
+| **Gson (warm)** | 94.13 ms | 20.50 ms | 6.32 ms | **~4.6x / ~14.9x parallel** |
+| **Gson (cold)** | 707.24 ms | 291.94 ms | 233.39 ms | **~2.4x / ~3.0x parallel** |
+| **Self-compilation (warm)** | 194.35 ms | 38.31 ms | 9.66 ms | **~5.1x / ~20.1x parallel** |
+| **Self-compilation (cold)** | 995.56 ms | 376.21 ms | 325.02 ms | **~2.6x / ~3.1x parallel** |
 
 ---
 

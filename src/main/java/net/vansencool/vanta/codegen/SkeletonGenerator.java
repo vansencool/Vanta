@@ -1,7 +1,6 @@
 package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.VantaCompiler;
-import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
@@ -13,12 +12,6 @@ import net.vansencool.vanta.parser.ast.declaration.MethodDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
 import net.vansencool.vanta.parser.ast.declaration.RecordComponent;
 import net.vansencool.vanta.parser.ast.declaration.TypeKind;
-import net.vansencool.vanta.parser.ast.expression.BinaryExpression;
-import net.vansencool.vanta.parser.ast.expression.Expression;
-import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
-import net.vansencool.vanta.parser.ast.expression.NameExpression;
-import net.vansencool.vanta.parser.ast.expression.ParenExpression;
-import net.vansencool.vanta.parser.ast.expression.UnaryExpression;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.parser.ast.type.TypeParameter;
 import org.jetbrains.annotations.NotNull;
@@ -35,11 +28,14 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Emits signature-only {@code .class} files for every type declared in a
- * {@link CompilationUnit}. Used by the two-pass {@link VantaCompiler#compileAll}
- * so cross-file references resolve against real classpath entries instead of
- * silently falling back to {@code Object}. Method bodies throw
- * {@link AbstractMethodError} because these classes are never meant to run.
+ * Emits signature only {@code .class} files for every type declared in a
+ * {@link CompilationUnit}. Used by the two pass {@link VantaCompiler#compileAll}
+ * so cross file references resolve against real classpath entries instead of
+ * silently falling back to {@code Object}.
+ * <p>
+ * Skeleton emission is deliberately shallow: no constant values, no generic
+ * signatures, no method bodies. Real codegen recomputes anything heavier when
+ * it actually needs it.
  */
 public final class SkeletonGenerator {
 
@@ -69,18 +65,6 @@ public final class SkeletonGenerator {
     );
     private final @NotNull Map<String, String> batchTypes = new HashMap<>();
 
-    private static boolean isConstTypeName(@NotNull String n) {
-        return switch (n) {
-            case "int", "long", "float", "double", "boolean", "byte", "short", "char", "String" -> true;
-            default -> false;
-        };
-    }
-
-    /**
-     * Emits skeleton bytecode for every top-level and nested class declared
-     * in {@code cu}. Returns a map from each class's internal name to its
-     * {@code .class} bytes.
-     */
     public @NotNull Map<String, byte[]> emit(@NotNull CompilationUnit cu) {
         Context ctx = new Context(cu);
         Map<String, byte[]> out = new HashMap<>();
@@ -91,11 +75,9 @@ public final class SkeletonGenerator {
     }
 
     /**
-     * Records every type declared in {@code cu} against the shared batch
-     * registry so cross-file imports can resolve nested-class references
-     * correctly without having to load the class on the system classpath.
-     * Callers invoke this on every source in a batch before calling
-     * {@link #emit} so skeleton emission sees sibling files' types.
+     * Records every type declared in {@code cu} so cross file imports can
+     * resolve nested class references without round tripping through the
+     * system classpath.
      */
     public void registerBatchTypes(@NotNull CompilationUnit cu) {
         String pkg = cu.packageName() == null ? "" : cu.packageName().replace('.', '/');
@@ -107,10 +89,6 @@ public final class SkeletonGenerator {
         }
     }
 
-    /**
-     * Walks a declared class and registers every nested class under its correct
-     * {@code Outer$Inner} internal name against the shared batch registry.
-     */
     private void registerBatchType(@NotNull ClassDeclaration cd, @NotNull String internalName) {
         batchTypes.put(cd.name(), internalName);
         batchTypes.put(internalName.replace('/', '.'), internalName);
@@ -121,62 +99,47 @@ public final class SkeletonGenerator {
         }
     }
 
-    /**
-     * Emits {@code cd} and any nested types as standalone {@code .class}
-     * entries into {@code out}. Nested classes are encoded as {@code Outer$Inner}.
-     */
     private void emitClass(@NotNull Map<String, byte[]> out, @NotNull Context ctx, @NotNull ClassDeclaration cd, @Nullable String outerInternal) {
         String internalName = outerInternal == null
                 ? (ctx.packageInternal.isEmpty() ? cd.name() : ctx.packageInternal + "/" + cd.name())
                 : outerInternal + "$" + cd.name();
         ctx.registerType(cd.name(), internalName);
         if (cd.typeParameters() != null) {
-            for (TypeParameter tp : cd.typeParameters()) {
-                ctx.typeParams.add(tp.name());
-            }
+            for (TypeParameter tp : cd.typeParameters()) ctx.typeParams.add(tp.name());
         }
         for (AstNode m : cd.members()) {
-            if (m instanceof ClassDeclaration inner) {
-                ctx.registerType(inner.name(), internalName + "$" + inner.name());
-            }
+            if (m instanceof ClassDeclaration inner) ctx.registerType(inner.name(), internalName + "$" + inner.name());
         }
 
-        int access = cd.modifiers();
         boolean isInterface = cd.kind() == TypeKind.INTERFACE || cd.kind() == TypeKind.ANNOTATION;
         boolean isEnum = cd.kind() == TypeKind.ENUM;
         boolean isRecord = cd.kind() == TypeKind.RECORD;
+        int access = cd.modifiers();
         if (isInterface) access |= Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
         if (isEnum) access |= Opcodes.ACC_ENUM | Opcodes.ACC_FINAL;
         if (isRecord) access |= Opcodes.ACC_FINAL;
-        if ((access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED | Opcodes.ACC_PRIVATE)) == 0) {
-            access |= Opcodes.ACC_PUBLIC;
-        }
+        if ((access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED | Opcodes.ACC_PRIVATE)) == 0) access |= Opcodes.ACC_PUBLIC;
         if (!isInterface) access |= Opcodes.ACC_SUPER;
 
         String superInternal = resolveSuper(ctx, cd, isEnum, isRecord, isInterface);
         String[] interfaces = resolveInterfaces(ctx, cd);
 
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-        String classSignature = classSignature(ctx, cd);
-        cw.visit(Opcodes.V17, access, internalName, classSignature, superInternal, interfaces);
+        cw.visit(Opcodes.V17, access, internalName, classSignature(ctx, cd), superInternal, interfaces);
 
         if (isEnum && cd.enumConstants() != null) {
             for (EnumConstant ec : cd.enumConstants()) {
-                cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM,
-                        ec.name(), "L" + internalName + ";", null, null).visitEnd();
+                cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM, ec.name(), "L" + internalName + ";", null, null).visitEnd();
             }
-            cw.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC,
-                    "$VALUES", "[L" + internalName + ";", null, null).visitEnd();
+            cw.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC, "$VALUES", "[L" + internalName + ";", null, null).visitEnd();
         }
 
         if (isRecord && cd.recordComponents() != null) {
             for (RecordComponent rc : cd.recordComponents()) {
-                cw.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL,
-                        rc.name(), typeDescriptor(ctx, rc.type()), null, null).visitEnd();
+                cw.visitField(Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL, rc.name(), typeDescriptor(ctx, rc.type()), null, null).visitEnd();
             }
         }
 
-        Map<String, Object> resolvedConsts = resolveAllStaticFinalConstants(cd, isInterface);
         boolean sawConstructor = false;
         for (AstNode m : cd.members()) {
             if (m instanceof FieldDeclaration fd) {
@@ -184,38 +147,24 @@ public final class SkeletonGenerator {
                 if (isInterface) fAccess |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
                 for (FieldDeclarator fdr : fd.declarators()) {
                     TypeNode fieldType = fd.type();
-                    if (fdr.extraArrayDimensions() > 0)
-                        fieldType = fieldType.withExtraDimensions(fdr.extraArrayDimensions());
+                    if (fdr.extraArrayDimensions() > 0) fieldType = fieldType.withExtraDimensions(fdr.extraArrayDimensions());
                     String fSig = typeHasGenerics(fieldType) ? typeSignature(ctx, fieldType) : null;
-                    Object constVal = null;
-                    if ((fAccess & Opcodes.ACC_STATIC) != 0 && (fAccess & Opcodes.ACC_FINAL) != 0) {
-                        constVal = resolvedConsts.get(fdr.name());
-                        if (constVal != null) constVal = coerceForField(constVal, fieldType.name());
-                    }
-                    cw.visitField(fAccess, fdr.name(), typeDescriptor(ctx, fieldType), fSig, constVal).visitEnd();
+                    cw.visitField(fAccess, fdr.name(), typeDescriptor(ctx, fieldType), fSig, null).visitEnd();
                 }
             } else if (m instanceof MethodDeclaration md) {
                 if ("<iinit>".equals(md.name()) || "<clinit>".equals(md.name())) continue;
-                String desc = methodDescriptor(ctx, md);
                 int mAccess = md.modifiers();
-                if (isInterface && (mAccess & Opcodes.ACC_STATIC) == 0 && md.body() == null) {
-                    mAccess |= Opcodes.ACC_ABSTRACT;
-                }
-                if (isInterface && (mAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE)) == 0) {
-                    mAccess |= Opcodes.ACC_PUBLIC;
-                }
+                if (isInterface && (mAccess & Opcodes.ACC_STATIC) == 0 && md.body() == null) mAccess |= Opcodes.ACC_ABSTRACT;
+                if (isInterface && (mAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE)) == 0) mAccess |= Opcodes.ACC_PUBLIC;
                 if (md.isVarargs()) mAccess |= Opcodes.ACC_VARARGS;
-                String mSig = methodSignature(ctx, md);
-                MethodVisitor mv = cw.visitMethod(mAccess, md.name(), desc, mSig, null);
-                if (!"<init>".equals(md.name())) {
-                    if ((mAccess & Opcodes.ACC_ABSTRACT) == 0 && (mAccess & Opcodes.ACC_NATIVE) == 0) {
-                        emitStubBody(mv);
-                    } else {
-                        mv.visitEnd();
-                    }
-                } else {
+                MethodVisitor mv = cw.visitMethod(mAccess, md.name(), methodDescriptor(ctx, md), methodSignature(ctx, md), null);
+                if ("<init>".equals(md.name())) {
                     sawConstructor = true;
                     emitCtorStub(mv, superInternal);
+                } else if ((mAccess & Opcodes.ACC_ABSTRACT) == 0 && (mAccess & Opcodes.ACC_NATIVE) == 0) {
+                    emitStubBody(mv);
+                } else {
+                    mv.visitEnd();
                 }
             }
         }
@@ -224,12 +173,8 @@ public final class SkeletonGenerator {
             emitCtorStub(mv, superInternal);
         }
         if (isEnum) {
-            MethodVisitor values = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
-                    "values", "()[L" + internalName + ";", null, null);
-            emitStubBody(values);
-            MethodVisitor valueOf = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
-                    "valueOf", "(Ljava/lang/String;)L" + internalName + ";", null, null);
-            emitStubBody(valueOf);
+            emitStubBody(cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "values", "()[L" + internalName + ";", null, null));
+            emitStubBody(cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "valueOf", "(Ljava/lang/String;)L" + internalName + ";", null, null));
         }
 
         cw.visitEnd();
@@ -240,11 +185,6 @@ public final class SkeletonGenerator {
         }
     }
 
-    /**
-     * Writes a throw-AbstractMethodError stub body so the verifier accepts
-     * the method but any accidental invocation fails loudly rather than
-     * silently returning null.
-     */
     private void emitStubBody(@NotNull MethodVisitor mv) {
         mv.visitCode();
         mv.visitTypeInsn(Opcodes.NEW, "java/lang/AbstractMethodError");
@@ -255,11 +195,6 @@ public final class SkeletonGenerator {
         mv.visitEnd();
     }
 
-    /**
-     * Writes a minimal constructor body that super-calls the parent class's
-     * no-arg ctor. Matches javac's default-constructor shape so the skeleton
-     * verifies even when the parent only exposes a default constructor.
-     */
     private void emitCtorStub(@NotNull MethodVisitor mv, @NotNull String superInternal) {
         mv.visitCode();
         mv.visitVarInsn(Opcodes.ALOAD, 0);
@@ -269,11 +204,6 @@ public final class SkeletonGenerator {
         mv.visitEnd();
     }
 
-    /**
-     * Returns the internal name of {@code cd}'s super class, defaulting to
-     * the appropriate JDK base ({@code Object}, {@code Enum}, {@code Record})
-     * when the source omits an explicit {@code extends} clause.
-     */
     private @NotNull String resolveSuper(@NotNull Context ctx, @NotNull ClassDeclaration cd, boolean isEnum, boolean isRecord, boolean isInterface) {
         if (isEnum) return "java/lang/Enum";
         if (isRecord) return "java/lang/Record";
@@ -292,15 +222,6 @@ public final class SkeletonGenerator {
         return valid.toArray(new String[0]);
     }
 
-    /**
-     * Builds the JVM method descriptor for {@code md} by converting each
-     * parameter and the return type via {@link #typeDescriptor}. Resolver
-     * lookups run against the batch-local type map populated as skeletons
-     * are emitted, with JDK built-ins (String, Integer, ...) as a fallback.
-     * Method-level type parameters are pushed onto the erasure scope for the
-     * descriptor build and popped back out afterwards so a method-local
-     * {@code <T>} does not leak into sibling method descriptors.
-     */
     private @NotNull String methodDescriptor(@NotNull Context ctx, @NotNull MethodDeclaration md) {
         List<String> added = new ArrayList<>();
         if (md.typeParameters() != null) {
@@ -320,16 +241,10 @@ public final class SkeletonGenerator {
         }
     }
 
-    /**
-     * Converts {@code t} into a JVM descriptor string, handling array
-     * dimensions, primitives, and resolving simple type names via the
-     * batch-local type registry.
-     */
     private @NotNull String typeDescriptor(@NotNull Context ctx, @NotNull TypeNode t) {
         StringBuilder sb = new StringBuilder();
         sb.append("[".repeat(Math.max(0, t.arrayDimensions())));
-        String name = t.name();
-        switch (name) {
+        switch (t.name()) {
             case "boolean" -> sb.append('Z');
             case "byte" -> sb.append('B');
             case "short" -> sb.append('S');
@@ -339,27 +254,28 @@ public final class SkeletonGenerator {
             case "float" -> sb.append('F');
             case "double" -> sb.append('D');
             case "void" -> sb.append('V');
-            default -> sb.append('L').append(resolveReferenceInternal(ctx, name)).append(';');
+            default -> sb.append('L').append(resolveReferenceInternal(ctx, t.name())).append(';');
         }
         return sb.toString();
     }
 
-    /**
-     * Returns true when a type node carries generic type arguments anywhere in
-     * its spine, signalling that the caller should emit a {@code Signature}
-     * attribute to preserve the generic information for downstream reflection.
-     */
+    private @NotNull String typeInternal(@NotNull Context ctx, @NotNull TypeNode t) {
+        if (PRIMITIVES.contains(t.name())) return "java/lang/Object";
+        if (t.arrayDimensions() > 0) return "java/lang/Object";
+        return resolveReferenceInternal(ctx, t.name());
+    }
+
     private boolean typeHasGenerics(@NotNull TypeNode t) {
-        if (t.typeArguments() != null && !t.typeArguments().isEmpty()) return true;
-        if (t.typeArguments() != null) for (TypeNode arg : t.typeArguments()) if (typeHasGenerics(arg)) return true;
-        return false;
+        if (t.typeArguments() == null || t.typeArguments().isEmpty()) return false;
+        for (TypeNode arg : t.typeArguments()) {
+            if (typeHasGenerics(arg)) return true;
+        }
+        return true;
     }
 
     /**
-     * Builds a JVMS §4.7.9.1 field-type signature for {@code t}, preserving
-     * generic type arguments. Type variables emit as {@code TName;} so
-     * reflection can recover the original {@code T} name for downstream
-     * method return-type inference.
+     * JVMS §4.7.9.1 field type signature. Type variables emit as {@code TName;}
+     * so reflection downstream can recover the original {@code T} name.
      */
     private @NotNull String typeSignature(@NotNull Context ctx, @NotNull TypeNode t) {
         StringBuilder sb = new StringBuilder();
@@ -368,15 +284,8 @@ public final class SkeletonGenerator {
         return sb.toString();
     }
 
-    /**
-     * Helper for {@link #typeSignature} that walks a type and its arguments
-     * recursively onto the shared {@link StringBuilder}. Primitives, type
-     * variables, and parameterised reference types are handled inline; array
-     * dimensions are expected to be emitted by the caller.
-     */
     private void appendTypeSig(@NotNull StringBuilder sb, @NotNull Context ctx, @NotNull TypeNode t) {
-        String name = t.name();
-        switch (name) {
+        switch (t.name()) {
             case "boolean" -> {
                 sb.append('Z');
                 return;
@@ -414,11 +323,11 @@ public final class SkeletonGenerator {
                 return;
             }
         }
-        if (ctx.typeParams.contains(name)) {
-            sb.append('T').append(name).append(';');
+        if (ctx.typeParams.contains(t.name())) {
+            sb.append('T').append(t.name()).append(';');
             return;
         }
-        String resolved = resolveReferenceInternal(ctx, name);
+        String resolved = resolveReferenceInternal(ctx, t.name());
         sb.append('L').append(resolved);
         if (!"java/lang/Object".equals(resolved) && t.typeArguments() != null && !t.typeArguments().isEmpty()) {
             sb.append('<');
@@ -434,19 +343,20 @@ public final class SkeletonGenerator {
     }
 
     /**
-     * Emits the JVMS §4.7.9.1 class signature when the type parameters or
-     * supertype list carry generics. Returns {@code null} for plain
-     * non-generic classes so {@link ClassWriter#visit} can skip the
-     * {@code Signature} attribute entirely.
+     * Returns {@code null} for plain non generic classes so the
+     * {@code Signature} attribute is skipped entirely.
      */
     private @Nullable String classSignature(@NotNull Context ctx, @NotNull ClassDeclaration cd) {
         boolean hasGenerics = cd.typeParameters() != null && !cd.typeParameters().isEmpty();
         if (!hasGenerics && cd.superClass() != null && typeHasGenerics(cd.superClass())) hasGenerics = true;
-        if (!hasGenerics) for (TypeNode iface : cd.interfaces())
-            if (typeHasGenerics(iface)) {
-                hasGenerics = true;
-                break;
+        if (!hasGenerics) {
+            for (TypeNode iface : cd.interfaces()) {
+                if (typeHasGenerics(iface)) {
+                    hasGenerics = true;
+                    break;
+                }
             }
+        }
         if (!hasGenerics) return null;
         StringBuilder sb = new StringBuilder();
         if (cd.typeParameters() != null && !cd.typeParameters().isEmpty()) {
@@ -472,21 +382,24 @@ public final class SkeletonGenerator {
     }
 
     /**
-     * Emits the JVMS §4.7.9.1 method signature when the method parameters or
-     * return type carry generics. Returns {@code null} when none do.
+     * Returns {@code null} when neither the parameters nor the return type
+     * carry generics so the {@code Signature} attribute is skipped.
      */
     private @Nullable String methodSignature(@NotNull Context ctx, @NotNull MethodDeclaration md) {
         boolean hasGenerics = md.typeParameters() != null && !md.typeParameters().isEmpty();
         if (!hasGenerics) {
-            for (Parameter p : md.parameters())
+            for (Parameter p : md.parameters()) {
                 if (typeHasGenerics(p.type()) || ctx.typeParams.contains(p.type().name())) {
                     hasGenerics = true;
                     break;
                 }
+            }
         }
-        if (!hasGenerics && (typeHasGenerics(md.returnType()) || ctx.typeParams.contains(md.returnType().name())))
+        if (!hasGenerics && (typeHasGenerics(md.returnType()) || ctx.typeParams.contains(md.returnType().name()))) {
             hasGenerics = true;
+        }
         if (!hasGenerics) return null;
+
         List<String> added = new ArrayList<>();
         if (md.typeParameters() != null) {
             for (TypeParameter tp : md.typeParameters()) {
@@ -505,7 +418,9 @@ public final class SkeletonGenerator {
                             sb.append(':');
                             appendTypeSig(sb, ctx, tp.bounds().get(i));
                         }
-                    } else sb.append("Ljava/lang/Object;");
+                    } else {
+                        sb.append("Ljava/lang/Object;");
+                    }
                 }
                 sb.append('>');
             }
@@ -515,8 +430,9 @@ public final class SkeletonGenerator {
                 appendTypeSig(sb, ctx, p.type());
             }
             sb.append(')');
-            if ("<init>".equals(md.name())) sb.append('V');
-            else {
+            if ("<init>".equals(md.name())) {
+                sb.append('V');
+            } else {
                 sb.append("[".repeat(Math.max(0, md.returnType().arrayDimensions())));
                 appendTypeSig(sb, ctx, md.returnType());
             }
@@ -527,23 +443,10 @@ public final class SkeletonGenerator {
     }
 
     /**
-     * Same as {@link #typeDescriptor} but forces a reference-type internal
-     * name: used for super-class and interface references where primitives
-     * are not legal.
-     */
-    private @NotNull String typeInternal(@NotNull Context ctx, @NotNull TypeNode t) {
-        if (PRIMITIVES.contains(t.name())) return "java/lang/Object";
-        if (t.arrayDimensions() > 0) return "java/lang/Object";
-        return resolveReferenceInternal(ctx, t.name());
-    }
-
-    /**
-     * Resolves an unqualified type name into an internal name. Tries, in
-     * order: already-emitted skeleton types in this batch; dot-prefixed
-     * fully-qualified names in the source; single-type imports; star imports;
-     * JDK built-ins; same-package fallback. The final fallback keeps the
-     * skeleton compilable even when we cannot prove the type exists, which
-     * is acceptable because these stubs are never executed.
+     * Tries, in order: already emitted skeleton types, dot prefixed FQNs in the
+     * source, single type imports, JDK built ins, same package fallback. The
+     * final fallback returns {@code java/lang/Object} so the skeleton stays
+     * compilable when we cannot prove the type exists.
      */
     private @NotNull String resolveReferenceInternal(@NotNull Context ctx, @NotNull String name) {
         if (ctx.typeParams.contains(name)) return "java/lang/Object";
@@ -571,12 +474,6 @@ public final class SkeletonGenerator {
         if (local != null) return local;
         String imp = ctx.singleTypeImports.get(name);
         if (imp != null) return imp;
-        for (String star : ctx.starImports) {
-            if (star.equals("java/lang/")) {
-                String builtin = BUILTIN_FQN.get(name);
-                if (builtin != null) return builtin;
-            }
-        }
         String builtin = BUILTIN_FQN.get(name);
         if (builtin != null) return builtin;
         try {
@@ -604,204 +501,6 @@ public final class SkeletonGenerator {
         return "java/lang/Object";
     }
 
-    /**
-     * Runs a fixed-point evaluation over all {@code static final} field
-     * initializers in the class, so references like
-     * {@code DIM_MASK = ((1 << DIM_SIZE) - 1) << DIM_SHIFT} resolve once
-     * {@code DIM_SIZE} / {@code DIM_SHIFT} are known. Returns the map
-     * {@code fieldName -> boxed constant}.
-     */
-    private @NotNull Map<String, Object> resolveAllStaticFinalConstants(@NotNull ClassDeclaration cd, boolean isInterface) {
-        Map<String, Object> out = new HashMap<>();
-        Map<String, FieldDeclarator> decls = new HashMap<>();
-        Map<String, FieldDeclaration> enclosing = new HashMap<>();
-        for (AstNode m : cd.members()) {
-            if (!(m instanceof FieldDeclaration fd)) continue;
-            int mods = fd.modifiers();
-            boolean isSF = (mods & Opcodes.ACC_STATIC) != 0 && (mods & Opcodes.ACC_FINAL) != 0;
-            if (isInterface) isSF = true;
-            if (!isSF) continue;
-            for (FieldDeclarator fdr : fd.declarators()) {
-                if (fdr.initializer() != null) {
-                    decls.put(fdr.name(), fdr);
-                    enclosing.put(fdr.name(), fd);
-                }
-            }
-        }
-        int prev = -1;
-        while (out.size() != prev) {
-            prev = out.size();
-            for (Map.Entry<String, FieldDeclarator> e : decls.entrySet()) {
-                if (out.containsKey(e.getKey())) continue;
-                FieldDeclaration fd = enclosing.get(e.getKey());
-                if (fd.type().arrayDimensions() > 0) continue;
-                if (!isConstTypeName(fd.type().name())) continue;
-                Object v = foldExprWithScope(e.getValue().initializer(), out);
-                if (v != null) out.put(e.getKey(), v);
-            }
-        }
-        return out;
-    }
-
-    private @Nullable Object foldExprWithScope(@Nullable Expression expr, @NotNull Map<String, Object> scope) {
-        if (expr == null) return null;
-        while (expr instanceof ParenExpression p) expr = p.expression();
-        if (expr instanceof LiteralExpression lit) return foldLiteral(lit);
-        if (expr instanceof UnaryExpression u) {
-            Object inner = foldExprWithScope(u.operand(), scope);
-            if (inner == null) return null;
-            return applyUnary(u.operator(), inner);
-        }
-        if (expr instanceof BinaryExpression b) {
-            Object l = foldExprWithScope(b.left(), scope);
-            if (l == null) return null;
-            Object r = foldExprWithScope(b.right(), scope);
-            if (r == null) return null;
-            return applyBinary(b.operator(), l, r);
-        }
-        if (expr instanceof NameExpression ne) {
-            return scope.get(ne.name());
-        }
-        return null;
-    }
-
-    private @Nullable Object foldLiteral(@NotNull LiteralExpression lit) {
-        try {
-            TokenType lt = lit.literalType();
-            if (lt == TokenType.INT_LITERAL) {
-                String s = lit.value().replace("_", "");
-                return (int) Long.decode(s).longValue();
-            }
-            if (lt == TokenType.LONG_LITERAL) {
-                String s = lit.value().replace("_", "").replace("l", "").replace("L", "");
-                return Long.decode(s);
-            }
-            if (lt == TokenType.FLOAT_LITERAL) {
-                return Float.parseFloat(lit.value().replace("_", "").replace("f", "").replace("F", ""));
-            }
-            if (lt == TokenType.DOUBLE_LITERAL) {
-                return Double.parseDouble(lit.value().replace("_", "").replace("d", "").replace("D", ""));
-            }
-            if (lt == TokenType.STRING_LITERAL) {
-                String v = lit.value();
-                if (v.startsWith("\"") && v.endsWith("\"")) v = v.substring(1, v.length() - 1);
-                return v;
-            }
-            if (lt == TokenType.CHAR_LITERAL) {
-                String v = lit.value();
-                if (v.length() < 3) return null;
-                return (int) v.charAt(1);
-            }
-            if (lt == TokenType.TRUE) return 1;
-            if (lt == TokenType.FALSE) return 0;
-            return null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private @Nullable Object applyUnary(@NotNull String op, @NotNull Object v) {
-        switch (op) {
-            case "+" -> {
-                return v;
-            }
-            case "-" -> {
-                if (v instanceof Integer i) return -i;
-                if (v instanceof Long l) return -l;
-                if (v instanceof Float f) return -f;
-                if (v instanceof Double d) return -d;
-                return null;
-            }
-            case "~" -> {
-                if (v instanceof Integer i) return ~i;
-                if (v instanceof Long l) return ~l;
-                return null;
-            }
-        }
-        if ("!".equals(op) && v instanceof Integer i) return i == 0 ? 1 : 0;
-        return null;
-    }
-
-    private @Nullable Object applyBinary(@NotNull String op, @NotNull Object l, @NotNull Object r) {
-        if (l instanceof String || r instanceof String) {
-            if ("+".equals(op)) return String.valueOf(l) + r;
-            return null;
-        }
-        if (!(l instanceof Number) || !(r instanceof Number)) return null;
-        if (l instanceof Double || r instanceof Double) {
-            double a = ((Number) l).doubleValue();
-            double b = ((Number) r).doubleValue();
-            return switch (op) {
-                case "+" -> a + b;
-                case "-" -> a - b;
-                case "*" -> a * b;
-                case "/" -> b == 0 ? null : a / b;
-                case "%" -> b == 0 ? null : a % b;
-                default -> null;
-            };
-        }
-        if (l instanceof Float || r instanceof Float) {
-            float a = ((Number) l).floatValue();
-            float b = ((Number) r).floatValue();
-            return switch (op) {
-                case "+" -> a + b;
-                case "-" -> a - b;
-                case "*" -> a * b;
-                case "/" -> b == 0f ? null : a / b;
-                case "%" -> b == 0f ? null : a % b;
-                default -> null;
-            };
-        }
-        if (l instanceof Long || r instanceof Long) {
-            long a = ((Number) l).longValue();
-            long b = ((Number) r).longValue();
-            return switch (op) {
-                case "+" -> a + b;
-                case "-" -> a - b;
-                case "*" -> a * b;
-                case "/" -> b == 0L ? null : a / b;
-                case "%" -> b == 0L ? null : a % b;
-                case "&" -> a & b;
-                case "|" -> a | b;
-                case "^" -> a ^ b;
-                case "<<" -> a << b;
-                case ">>" -> a >> b;
-                case ">>>" -> a >>> b;
-                default -> null;
-            };
-        }
-        int a = ((Number) l).intValue();
-        int b = ((Number) r).intValue();
-        return switch (op) {
-            case "+" -> a + b;
-            case "-" -> a - b;
-            case "*" -> a * b;
-            case "/" -> b == 0 ? null : a / b;
-            case "%" -> b == 0 ? null : a % b;
-            case "&" -> a & b;
-            case "|" -> a | b;
-            case "^" -> a ^ b;
-            case "<<" -> a << b;
-            case ">>" -> a >> b;
-            case ">>>" -> a >>> b;
-            default -> null;
-        };
-    }
-
-    private @Nullable Object coerceForField(@NotNull Object v, @NotNull String typeName) {
-        return switch (typeName) {
-            case "byte" -> v instanceof Number n ? (int) (byte) n.intValue() : null;
-            case "short" -> v instanceof Number n ? (int) (short) n.intValue() : null;
-            case "char" -> v instanceof Number n ? (n.intValue() & 0xFFFF) : null;
-            case "int", "boolean" -> v instanceof Number n ? n.intValue() : v;
-            case "long" -> v instanceof Number n ? n.longValue() : null;
-            case "float" -> v instanceof Number n ? n.floatValue() : null;
-            case "double" -> v instanceof Number n ? n.doubleValue() : null;
-            case "String" -> v instanceof String ? v : null;
-            default -> v;
-        };
-    }
-
     private @NotNull String dottedFqnToInternal(@NotNull String dotted) {
         String[] parts = dotted.split("\\.");
         ClassLoader loader = ClassLoader.getSystemClassLoader();
@@ -824,12 +523,6 @@ public final class SkeletonGenerator {
         return dotted.replace('.', '/');
     }
 
-    /**
-     * Pre-resolved import and package info for the current compilation unit.
-     * Types declared inside the unit register themselves here as they are
-     * emitted so nested and sibling types resolve before their {@code .class}
-     * is written.
-     */
     private final class Context {
         final @NotNull String packageInternal;
         final @NotNull Map<String, String> singleTypeImports = new HashMap<>();

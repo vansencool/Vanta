@@ -648,7 +648,7 @@ public final class Equiv {
         for (Map.Entry<String, String> e : vantaSources.entrySet()) {
             skeletonSources.put(Paths.get(e.getKey()).getFileName().toString(), e.getValue());
         }
-        compiler.registerSignatureSkeletons(skeletonSources);
+        compiler.registerSignatureSkeletons(compiler.parseAll(skeletonSources));
 
         List<String> compileFailures = new ArrayList<>();
         Map<String, byte[]> vantaOut = new HashMap<>();
