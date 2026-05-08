@@ -9,6 +9,7 @@ import net.vansencool.vanta.codegen.MethodGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclarator;
@@ -96,6 +97,9 @@ public final class ObjectCreationEmitter {
         MethodContext ctx = exprGen.ctx();
         MethodVisitor mv = ctx.mv();
         String declaredType = ctx.typeResolver().resolveInternalName(newExpr.type());
+        if (newExpr.anonymousClassBody() == null && !isResolvableType(declaredType)) {
+            throw new CodeGenException("Cannot resolve type '" + declaredType.replace('/', '.') + "' in new expression", newExpr.line());
+        }
         boolean targetIsInterface = isTargetInterface(declaredType);
         String superInternal = targetIsInterface ? "java/lang/Object" : declaredType;
         String[] interfaces = targetIsInterface ? new String[]{declaredType} : null;
@@ -207,6 +211,26 @@ public final class ObjectCreationEmitter {
         if (c != null) return c.isInterface();
         AsmClassInfo info = ctx.methodResolver().classpathManager().asmClassInfo(internalName);
         return info != null && info.isInterface();
+    }
+
+    /**
+     * @param internalName class internal name
+     * @return true when {@code internalName} resolves via classpath, ASM
+     * info, or matches the class currently being compiled (or one of its
+     * nested/anonymous siblings registered on the owning generator)
+     */
+    private boolean isResolvableType(@NotNull String internalName) {
+        MethodContext ctx = exprGen.ctx();
+        ClasspathManager cp = ctx.methodResolver().classpathManager();
+        if (cp.exists(internalName)) return true;
+        if (cp.asmClassInfo(internalName) != null) return true;
+        if (internalName.equals(ctx.classInternalName())) return true;
+        ClassGenerator cg = ctx.classGenerator();
+        if (cg != null) {
+            if (cg.anonClassNames().contains(internalName)) return true;
+            if (cg.nestMemberInternals().contains(internalName)) return true;
+        }
+        return false;
     }
 
     /**
