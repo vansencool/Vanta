@@ -2,7 +2,6 @@ package net.vansencool.vanta;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
-import net.vansencool.vanta.codegen.SkeletonGenerator;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
@@ -16,6 +15,7 @@ import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -256,7 +256,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      */
     public @NotNull Map<String, byte[]> compileAll(@NotNull Map<String, String> sources) {
         Map<String, CompilationUnit> parsed = parseAll(sources);
-        registerSignatureSkeletons(parsed);
+        registerSources(parsed);
         Map<String, byte[]> result = new HashMap<>();
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             String path = entry.getKey();
@@ -267,19 +267,24 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     }
 
     /**
-     * Registers a signature only skeleton class for every declared type in
-     * {@code parsed} so subsequent {@link #compile} calls resolve cross file
-     * references against real classpath entries instead of silently falling
-     * back to {@code Object}.
+     * Registers each parsed compilation unit on the shared {@link TypeRegistry}
+     * so cross file types resolve to AST backed symbols. Builds a
+     * {@link TypeResolver} per source file from its imports and package so
+     * unqualified references inside one file resolve against that file's
+     * scope.
      */
-    public void registerSignatureSkeletons(@NotNull Map<String, CompilationUnit> parsed) {
-        SkeletonGenerator skeletonGen = new SkeletonGenerator();
-        for (CompilationUnit cu : parsed.values()) skeletonGen.registerBatchTypes(cu);
-        for (CompilationUnit cu : parsed.values()) {
-            Map<String, byte[]> skeletons = skeletonGen.emit(cu);
-            for (Map.Entry<String, byte[]> sk : skeletons.entrySet()) {
-                classpathManager.registerInMemoryClass(sk.getKey(), sk.getValue());
+    public void registerSources(@NotNull Map<String, CompilationUnit> parsed) {
+        TypeRegistry registry = classpathManager.typeRegistry();
+        for (Map.Entry<String, CompilationUnit> e : parsed.entrySet()) {
+            CompilationUnit cu = e.getValue();
+            TypeResolver tr = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
+            for (AstNode typeDecl : cu.typeDeclarations()) {
+                if (typeDecl instanceof ClassDeclaration cd) {
+                    String outerInternalName = toInternalName(cd.name(), cu.packageName());
+                    registerInnerClasses(tr, cd, outerInternalName);
+                }
             }
+            registry.register(e.getKey(), cu, tr);
         }
     }
 
@@ -306,11 +311,8 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
             }
         }
         ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
-        long t0 = System.nanoTime();
         Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
-        long t1 = System.nanoTime();
-        registerSignatureSkeletons(parsed);
-        long t2 = System.nanoTime();
+        registerSources(parsed);
         MethodParallelism.current(mode.methodWorkers());
         try {
             Map<String, byte[]> result = new ConcurrentHashMap<>();
@@ -336,9 +338,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 } catch (Exception ignored) {
                 }
             }
-            long t3 = System.nanoTime();
-            System.err.printf("[Vanta-time] parse=%.2fms skel=%.2fms codegen=%.2fms total=%.2fms files=%d%n",
-                    (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, (t3 - t0) / 1e6, sources.size());
             if (firstFailure.get() != null) throw firstFailure.get();
             return result;
         } finally {
@@ -359,7 +358,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         if (fileWorkers <= 1) return compileAll(sources);
         ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
         Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
-        registerSignatureSkeletons(parsed);
+        registerSources(parsed);
         int[] lengths = sources.values().stream().mapToInt(String::length).sorted().toArray();
         int median = lengths[lengths.length / 2];
         int p95 = lengths[Math.min(lengths.length - 1, (int) (lengths.length * 0.95))];

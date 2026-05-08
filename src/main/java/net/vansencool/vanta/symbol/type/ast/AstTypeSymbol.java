@@ -2,9 +2,11 @@ package net.vansencool.vanta.symbol.type.ast;
 
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
+import net.vansencool.vanta.parser.ast.declaration.EnumConstant;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclarator;
 import net.vansencool.vanta.parser.ast.declaration.MethodDeclaration;
+import net.vansencool.vanta.parser.ast.declaration.RecordComponent;
 import net.vansencool.vanta.parser.ast.declaration.TypeKind;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.parser.ast.type.TypeParameter;
@@ -12,8 +14,13 @@ import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.symbol.Position;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.ast.AstFieldSymbol;
+import net.vansencool.vanta.symbol.field.synth.SyntheticFieldSymbol;
+import net.vansencool.vanta.symbol.type.ref.TypeRefs;
+import net.vansencool.vanta.symbol.type.ref.build.RefFromAst;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.method.ast.AstConstructorSymbol;
 import net.vansencool.vanta.symbol.method.ast.AstMethodSymbol;
+import net.vansencool.vanta.symbol.method.synth.SyntheticDefaultConstructor;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
@@ -33,17 +40,19 @@ public final class AstTypeSymbol implements TypeSymbol {
     private final @NotNull TypeResolver typeResolver;
     private final @NotNull TypeRegistry registry;
     private final @Nullable String sourceFile;
+    private final @Nullable String enclosingNonStaticOuter;
     private @Nullable List<MethodSymbol> cachedMethods;
     private @Nullable List<FieldSymbol> cachedFields;
     private @Nullable List<TypeSymbol> cachedNestedTypes;
     private @Nullable List<TypeParameterSymbol> cachedTypeParameters;
 
-    public AstTypeSymbol(@NotNull ClassDeclaration declaration, @NotNull String internalName, @NotNull TypeResolver typeResolver, @NotNull TypeRegistry registry, @Nullable String sourceFile) {
+    public AstTypeSymbol(@NotNull ClassDeclaration declaration, @NotNull String internalName, @NotNull TypeResolver typeResolver, @NotNull TypeRegistry registry, @Nullable String sourceFile, @Nullable String enclosingNonStaticOuter) {
         this.declaration = declaration;
         this.internalName = internalName;
         this.typeResolver = typeResolver;
         this.registry = registry;
         this.sourceFile = sourceFile;
+        this.enclosingNonStaticOuter = enclosingNonStaticOuter;
     }
 
     @Override
@@ -105,11 +114,20 @@ public final class AstTypeSymbol implements TypeSymbol {
         if (cachedMethods != null) return cachedMethods;
         Set<String> typeVariables = ownTypeVariableNames();
         List<MethodSymbol> out = new ArrayList<>();
+        boolean sawConstructor = false;
         for (AstNode m : declaration.members()) {
             if (m instanceof MethodDeclaration md) {
                 Position pos = sourceFile != null ? Position.of(sourceFile, md.line()) : null;
-                out.add(new AstMethodSymbol(md, this, typeResolver, typeVariables, pos));
+                if ("<init>".equals(md.name())) {
+                    sawConstructor = true;
+                    out.add(new AstConstructorSymbol(md, this, typeResolver, typeVariables, pos, enclosingNonStaticOuter));
+                } else {
+                    out.add(new AstMethodSymbol(md, this, typeResolver, typeVariables, pos));
+                }
             }
+        }
+        if (!sawConstructor && !isInterface() && !isEnum() && !isRecord()) {
+            out.add(new SyntheticDefaultConstructor(this, enclosingNonStaticOuter));
         }
         cachedMethods = List.copyOf(out);
         return cachedMethods;
@@ -120,6 +138,19 @@ public final class AstTypeSymbol implements TypeSymbol {
         if (cachedFields != null) return cachedFields;
         Set<String> typeVariables = ownTypeVariableNames();
         List<FieldSymbol> out = new ArrayList<>();
+        if (isEnum() && declaration.enumConstants() != null) {
+            int enumAccess = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
+            for (EnumConstant ec : declaration.enumConstants()) {
+                Position pos = sourceFile != null ? Position.of(sourceFile, ec.line()) : null;
+                out.add(new SyntheticFieldSymbol(ec.name(), TypeRefs.ofObject(internalName), enumAccess, null, this, pos));
+            }
+        }
+        if (isRecord() && declaration.recordComponents() != null) {
+            int recordAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL;
+            for (RecordComponent rc : declaration.recordComponents()) {
+                out.add(new SyntheticFieldSymbol(rc.name(), RefFromAst.from(rc.type(), typeResolver, typeVariables), recordAccess, null, this, null));
+            }
+        }
         for (AstNode m : declaration.members()) {
             if (m instanceof FieldDeclaration fd) {
                 Position pos = sourceFile != null ? Position.of(sourceFile, fd.line()) : null;

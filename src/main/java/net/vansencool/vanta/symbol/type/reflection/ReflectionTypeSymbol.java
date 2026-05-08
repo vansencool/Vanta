@@ -112,7 +112,7 @@ public final class ReflectionTypeSymbol implements TypeSymbol {
         List<MethodSymbol> out = new ArrayList<>(declared.length + ctors.length);
         for (Method m : declared) {
             String descriptor = classpathManager.methodDescriptor(m);
-            out.add(new ReflectionMethodSymbol(m, this, descriptor));
+            out.add(new ReflectionMethodSymbol(m, this, registry, descriptor));
         }
         for (Constructor<?> c : ctors) {
             String descriptor = Type.getConstructorDescriptor(c);

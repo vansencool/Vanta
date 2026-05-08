@@ -12,6 +12,7 @@ import net.vansencool.vanta.symbol.type.ast.AstTypeSymbol;
 import net.vansencool.vanta.symbol.type.reflection.ReflectionTypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.objectweb.asm.Opcodes;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,17 +50,18 @@ public final class TypeRegistry {
         for (AstNode decl : cu.typeDeclarations()) {
             if (decl instanceof ClassDeclaration cd) {
                 String internal = pkg.isEmpty() ? cd.name() : pkg + "/" + cd.name();
-                registerRecursive(sourceFile, cu, cd, internal, typeResolver);
+                registerRecursive(sourceFile, cu, cd, internal, typeResolver, null);
             }
         }
     }
 
-    private void registerRecursive(@NotNull String sourceFile, @NotNull CompilationUnit cu, @NotNull ClassDeclaration cd, @NotNull String internalName, @NotNull TypeResolver typeResolver) {
-        astSources.put(internalName, new AstEntry(sourceFile, cu, cd, typeResolver));
+    private void registerRecursive(@NotNull String sourceFile, @NotNull CompilationUnit cu, @NotNull ClassDeclaration cd, @NotNull String internalName, @NotNull TypeResolver typeResolver, @Nullable String enclosingNonStaticOuter) {
+        astSources.put(internalName, new AstEntry(sourceFile, cu, cd, typeResolver, enclosingNonStaticOuter));
         cache.remove(internalName);
         for (AstNode m : cd.members()) {
             if (m instanceof ClassDeclaration nested) {
-                registerRecursive(sourceFile, cu, nested, internalName + "$" + nested.name(), typeResolver);
+                String childOuter = (nested.modifiers() & Opcodes.ACC_STATIC) == 0 ? internalName : null;
+                registerRecursive(sourceFile, cu, nested, internalName + "$" + nested.name(), typeResolver, childOuter);
             }
         }
     }
@@ -69,7 +71,7 @@ public final class TypeRegistry {
         if (cached != null) return cached;
         AstEntry ast = astSources.get(internalName);
         if (ast != null) {
-            TypeSymbol sym = new AstTypeSymbol(ast.declaration(), internalName, ast.typeResolver(), this, ast.sourceFile());
+            TypeSymbol sym = new AstTypeSymbol(ast.declaration(), internalName, ast.typeResolver(), this, ast.sourceFile(), ast.enclosingNonStaticOuter());
             cache.put(internalName, sym);
             return sym;
         }
@@ -98,6 +100,7 @@ public final class TypeRegistry {
     }
 
     private record AstEntry(@NotNull String sourceFile, @NotNull CompilationUnit cu,
-                            @NotNull ClassDeclaration declaration, @NotNull TypeResolver typeResolver) {
+                            @NotNull ClassDeclaration declaration, @NotNull TypeResolver typeResolver,
+                            @Nullable String enclosingNonStaticOuter) {
     }
 }

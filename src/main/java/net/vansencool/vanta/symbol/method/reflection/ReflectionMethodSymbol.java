@@ -2,6 +2,7 @@ package net.vansencool.vanta.symbol.method.reflection;
 
 import net.vansencool.vanta.symbol.Position;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
 import net.vansencool.vanta.symbol.type.TypeRef;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
@@ -20,15 +21,18 @@ import java.util.List;
 public final class ReflectionMethodSymbol implements MethodSymbol {
 
     private final @NotNull Method method;
-    private final @NotNull TypeSymbol owner;
+    private final @NotNull TypeSymbol queriedFrom;
+    private final @NotNull TypeRegistry registry;
     private final @NotNull String descriptor;
+    private @Nullable TypeSymbol cachedOwner;
     private @Nullable List<TypeRef> cachedParameterTypes;
     private @Nullable TypeRef cachedReturnType;
     private @Nullable List<TypeParameterSymbol> cachedTypeParameters;
 
-    public ReflectionMethodSymbol(@NotNull Method method, @NotNull TypeSymbol owner, @NotNull String descriptor) {
+    public ReflectionMethodSymbol(@NotNull Method method, @NotNull TypeSymbol queriedFrom, @NotNull TypeRegistry registry, @NotNull String descriptor) {
         this.method = method;
-        this.owner = owner;
+        this.queriedFrom = queriedFrom;
+        this.registry = registry;
         this.descriptor = descriptor;
     }
 
@@ -125,6 +129,15 @@ public final class ReflectionMethodSymbol implements MethodSymbol {
 
     @Override
     public @NotNull TypeSymbol owner() {
-        return owner;
+        if (cachedOwner != null) return cachedOwner;
+        Class<?> declaring = method.getDeclaringClass();
+        String declaringInternal = declaring.getName().replace('.', '/');
+        if (declaringInternal.equals(queriedFrom.internalName())) {
+            cachedOwner = queriedFrom;
+            return cachedOwner;
+        }
+        TypeSymbol resolved = registry.lookup(declaringInternal);
+        cachedOwner = resolved != null ? resolved : queriedFrom;
+        return cachedOwner;
     }
 }
