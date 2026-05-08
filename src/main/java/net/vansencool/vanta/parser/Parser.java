@@ -1,5 +1,9 @@
 package net.vansencool.vanta.parser;
 
+import net.vansencool.vanta.diagnostic.Diagnostic;
+import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.util.SourceLines;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.AstNode;
@@ -60,7 +64,6 @@ import net.vansencool.vanta.parser.ast.statement.WhileStatement;
 import net.vansencool.vanta.parser.ast.statement.YieldStatement;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.parser.ast.type.TypeParameter;
-import net.vansencool.vanta.parser.exception.ParserException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -81,16 +84,20 @@ public final class Parser {
     private @NotNull Token @NotNull [] tokens;
     private int tokenCount;
     private int pos;
+    private final @NotNull String source;
+    private final @Nullable String sourceFile;
+    private int speculativeDepth;
 
-    /**
-     * Creates a parser for the given token list.
-     *
-     * @param tokens the token list
-     */
     public Parser(@NotNull List<Token> tokens) {
+        this(tokens, "", null);
+    }
+
+    public Parser(@NotNull List<Token> tokens, @NotNull String source, @Nullable String sourceFile) {
         this.tokens = tokens.toArray(new Token[0]);
         this.tokenCount = this.tokens.length;
         this.pos = 0;
+        this.source = source;
+        this.sourceFile = sourceFile;
     }
 
     /**
@@ -176,7 +183,17 @@ public final class Parser {
         if (check(RECORD)) {
             return parseRecordDeclaration(modifiers, annotations);
         }
-        throw error("Expected class, interface, enum, or record declaration");
+        if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+        Token tok = current();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("expected class, interface, enum, or record declaration")
+                .sourceFile(sourceFile)
+                .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
+                .label("expected one of `class`, `interface`, `enum`, `record`")
+                .help("a top level declaration must start with one of these keywords (after optional modifiers and annotations)")
+                .build());
     }
 
     /**
@@ -487,10 +504,13 @@ public final class Parser {
         List<TypeParameter> methodTypeParams = null;
         if (check(LESS)) {
             int saved = pos;
+            speculativeDepth++;
             try {
                 methodTypeParams = parseTypeParameters();
-            } catch (ParserException e) {
+            } catch (Backtrack b) {
                 pos = saved;
+            } finally {
+                speculativeDepth--;
             }
         }
 
@@ -1142,14 +1162,16 @@ public final class Parser {
      */
     private boolean isForEach() {
         int saved = pos;
+        speculativeDepth++;
         try {
             parseAnnotations();
             parseModifiers();
             parseType();
             return check(IDENTIFIER) && peek().type() == COLON;
-        } catch (ParserException e) {
+        } catch (Backtrack b) {
             return false;
         } finally {
+            speculativeDepth--;
             pos = saved;
         }
     }
@@ -1213,7 +1235,17 @@ public final class Parser {
                 advance();
                 isDefault = true;
             } else {
-                throw error("Expected 'case' or 'default'");
+                if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+                Token tokSwitch = current();
+                throw new CompilationException(Diagnostic.builder()
+                        .severity(Severity.ERROR)
+                        .title("expected `case` or `default`")
+                        .sourceFile(sourceFile)
+                        .at(tokSwitch.line(), SourceLines.lineAt(source, tokSwitch.line()))
+                        .highlight(tokSwitch.column() - 1, tokSwitch.column() - 1 + Math.max(1, tokSwitch.value().length()))
+                        .label("not a switch label")
+                        .help("inside a `switch`, every branch starts with `case <value>:` or `default:`")
+                        .build());
             }
 
             boolean isArrow = false;
@@ -1468,6 +1500,7 @@ public final class Parser {
      */
     private boolean isLocalVariableDeclaration() {
         int saved = pos;
+        speculativeDepth++;
         try {
             parseAnnotations();
             parseModifiers();
@@ -1478,9 +1511,10 @@ public final class Parser {
             if (t != IDENTIFIER) return false;
             parseType();
             return check(IDENTIFIER) || check(VAR) || check(YIELD) || check(RECORD);
-        } catch (ParserException e) {
+        } catch (Backtrack b) {
             return false;
         } finally {
+            speculativeDepth--;
             pos = saved;
         }
     }
@@ -1792,6 +1826,7 @@ public final class Parser {
      */
     private boolean isCast() {
         int saved = pos;
+        speculativeDepth++;
         try {
             advance();
             if (current().type().isPrimitive()) {
@@ -1817,9 +1852,10 @@ public final class Parser {
                         next == CHAR || next == BYTE || next == SHORT || next == VOID;
             }
             return false;
-        } catch (ParserException e) {
+        } catch (Backtrack b) {
             return false;
         } finally {
+            speculativeDepth--;
             pos = saved;
         }
     }
@@ -2004,7 +2040,16 @@ public final class Parser {
                         return new FieldAccessExpression(new NameExpression(type.toString(), line), "class", line);
                     }
                 }
-                throw error("Expected expression, found: " + current().type());
+                if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+                Token tokExpr = current();
+                throw new CompilationException(Diagnostic.builder()
+                        .severity(Severity.ERROR)
+                        .title("expected expression, found `" + tokExpr.value() + "`")
+                        .sourceFile(sourceFile)
+                        .at(tokExpr.line(), SourceLines.lineAt(source, tokExpr.line()))
+                        .highlight(tokExpr.column() - 1, tokExpr.column() - 1 + Math.max(1, tokExpr.value().length()))
+                        .label("not the start of an expression")
+                        .build());
         }
     }
 
@@ -2088,6 +2133,7 @@ public final class Parser {
      */
     private boolean isLambda() {
         int saved = pos;
+        speculativeDepth++;
         try {
             advance();
             if (check(RIGHT_PAREN)) {
@@ -2098,9 +2144,10 @@ public final class Parser {
             if (!check(RIGHT_PAREN)) return false;
             advance();
             return check(ARROW);
-        } catch (ParserException e) {
+        } catch (Backtrack b) {
             return false;
         } finally {
+            speculativeDepth--;
             pos = saved;
         }
     }
@@ -2298,7 +2345,16 @@ public final class Parser {
      */
     private void expect(@NotNull TokenType type) {
         if (!check(type)) {
-            throw error("Expected " + type + " but found " + current().type() + " '" + current().value() + "'");
+            if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("expected `" + tokenDisplay(type) + "`, found `" + tok.value() + "`")
+                    .sourceFile(sourceFile)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
+                    .label("expected `" + tokenDisplay(type) + "` here")
+                    .build());
         }
         advance();
     }
@@ -2322,7 +2378,16 @@ public final class Parser {
             insertTokenAt(pos + 1, new Token(RIGHT_SHIFT, ">>", tok.line(), tok.column() + 1));
             advance();
         } else {
-            throw error("Expected GREATER but found " + current().type() + " '" + current().value() + "'");
+            if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("expected `>` to close type arguments, found `" + tok.value() + "`")
+                    .sourceFile(sourceFile)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
+                    .label("expected `>` here")
+                    .build());
         }
     }
 
@@ -2333,7 +2398,16 @@ public final class Parser {
      */
     private @NotNull String expectIdentifier() {
         if (!check(IDENTIFIER) && !check(RECORD) && !check(VAR) && !check(YIELD)) {
-            throw error("Expected identifier but found " + current().type() + " '" + current().value() + "'");
+            if (speculativeDepth > 0) throw Backtrack.INSTANCE;
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("expected identifier, found `" + tok.value() + "`")
+                    .sourceFile(sourceFile)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
+                    .label("expected an identifier here")
+                    .build());
         }
         String value = current().value();
         advance();
@@ -2348,14 +2422,24 @@ public final class Parser {
         return type == IDENTIFIER || type == RECORD || type == VAR || type == YIELD;
     }
 
-    /**
-     * Creates a parser exception at the current position.
-     *
-     * @param message the error message
-     * @return the parser exception
-     */
-    private @NotNull ParserException error(@NotNull String message) {
-        Token tok = current();
-        return new ParserException(message, tok.line(), tok.column());
+    private static @NotNull String tokenDisplay(@NotNull TokenType type) {
+        return switch (type) {
+            case LEFT_PAREN -> "(";
+            case RIGHT_PAREN -> ")";
+            case LEFT_BRACE -> "{";
+            case RIGHT_BRACE -> "}";
+            case LEFT_BRACKET -> "[";
+            case RIGHT_BRACKET -> "]";
+            case SEMICOLON -> ";";
+            case COMMA -> ",";
+            case DOT -> ".";
+            case COLON -> ":";
+            case ARROW -> "->";
+            case ASSIGN -> "=";
+            case GREATER -> ">";
+            case LESS -> "<";
+            case AT -> "@";
+            default -> type.name().toLowerCase().replace('_', ' ');
+        };
     }
 }

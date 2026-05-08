@@ -1,9 +1,13 @@
 package net.vansencool.vanta.lexer;
 
-import net.vansencool.vanta.lexer.exception.LexerException;
+import net.vansencool.vanta.diagnostic.Diagnostic;
+import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.util.SourceLines;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.lexer.token.TokenType;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,18 +18,19 @@ import java.util.List;
 public final class Lexer {
 
     private final char @NotNull [] source;
+    private final @Nullable String sourceFile;
     private final int length;
     private int pos;
     private int line;
     private int column;
 
-    /**
-     * Creates a lexer for the given source code.
-     *
-     * @param source the Java source code to tokenize
-     */
     public Lexer(@NotNull String source) {
+        this(source, null);
+    }
+
+    public Lexer(@NotNull String source, @Nullable String sourceFile) {
         this.source = source.toCharArray();
+        this.sourceFile = sourceFile;
         this.length = this.source.length;
         this.pos = 0;
         this.line = 1;
@@ -147,7 +152,15 @@ public final class Lexer {
                 advance();
             }
         }
-        throw new LexerException("Unterminated block comment", startLine, startCol);
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unterminated block comment")
+                .sourceFile(sourceFile)
+                .at(startLine, SourceLines.lineAt(source, startLine))
+                .highlight(startCol - 1, startCol + 1)
+                .label("comment opens here")
+                .help("close the comment with `*/`")
+                .build());
     }
 
     /**
@@ -170,14 +183,31 @@ public final class Lexer {
                     advance();
                 }
             } else if (source[pos] == '\n') {
-                throw new LexerException("Unterminated string literal", startLine, startCol);
+                throw new CompilationException(Diagnostic.builder()
+                        .severity(Severity.ERROR)
+                        .title("unterminated string literal")
+                        .sourceFile(sourceFile)
+                        .at(startLine, SourceLines.lineAt(source, startLine))
+                        .highlight(startCol - 1, startCol)
+                        .label("string starts here")
+                        .note("string literals cannot span multiple lines")
+                        .help("close the string with `\"` before the newline, or use a text block `\"\"\"...\"\"\"` for multi line strings")
+                        .build());
             } else {
                 sb.append(source[pos]);
                 advance();
             }
         }
         if (pos >= length) {
-            throw new LexerException("Unterminated string literal", startLine, startCol);
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("unterminated string literal")
+                    .sourceFile(sourceFile)
+                    .at(startLine, SourceLines.lineAt(source, startLine))
+                    .highlight(startCol - 1, startCol)
+                    .label("string starts here")
+                    .help("add a closing `\"` to terminate the string")
+                    .build());
         }
         sb.append('"');
         advance();
@@ -213,7 +243,15 @@ public final class Lexer {
                 advance();
             }
         }
-        throw new LexerException("Unterminated text block", startLine, startCol);
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unterminated text block")
+                .sourceFile(sourceFile)
+                .at(startLine, SourceLines.lineAt(source, startLine))
+                .highlight(startCol - 1, startCol + 2)
+                .label("text block opens here")
+                .help("close the text block with `\"\"\"`")
+                .build());
     }
 
     /**
@@ -251,7 +289,16 @@ public final class Lexer {
             advance();
         }
         if (pos >= length || source[pos] != '\'') {
-            throw new LexerException("Unterminated character literal", startLine, startCol);
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("unterminated character literal")
+                    .sourceFile(sourceFile)
+                    .at(startLine, SourceLines.lineAt(source, startLine))
+                    .highlight(startCol - 1, startCol)
+                    .label("character literal starts here")
+                    .note("character literals must contain exactly one character")
+                    .help("close the literal with `'`, or use a string literal `\"...\"` for multi character text")
+                    .build());
         }
         sb.append('\'');
         advance();
@@ -605,7 +652,14 @@ public final class Lexer {
                 }
                 return new Token(TokenType.GREATER, ">", startLine, startCol);
             default:
-                throw new LexerException("Unexpected character: '" + c + "'", startLine, startCol);
+                throw new CompilationException(Diagnostic.builder()
+                        .severity(Severity.ERROR)
+                        .title("unexpected character `" + c + "`")
+                        .sourceFile(sourceFile)
+                        .at(startLine, SourceLines.lineAt(source, startLine))
+                        .highlight(startCol - 1, startCol)
+                        .label("not a valid token")
+                        .build());
         }
     }
 

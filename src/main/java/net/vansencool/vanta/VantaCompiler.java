@@ -4,16 +4,17 @@ import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.SkeletonGenerator;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.diagnostic.Diagnostic;
+import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.Lexer;
-import net.vansencool.vanta.lexer.exception.LexerException;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.parser.Parser;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
-import net.vansencool.vanta.parser.exception.ParserException;
 import net.vansencool.vanta.resolver.TypeResolver;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -138,9 +139,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      */
     public @NotNull Map<String, byte[]> compile(@NotNull String source, @Nullable String sourceFile) {
         try {
-            Lexer lexer = new Lexer(source);
+            Lexer lexer = new Lexer(source, sourceFile);
             List<Token> tokens = lexer.tokenize();
-            Parser parser = new Parser(tokens);
+            Parser parser = new Parser(tokens, source, sourceFile);
             CompilationUnit cu = parser.parse();
 
             TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
@@ -166,12 +167,15 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
             }
 
             return result;
-        } catch (LexerException e) {
-            throw new CompilationException(CompilationException.formatError(source, sourceFile, e.getMessage(), e.line(), e.column(), "Lexer"), e.line(), e.column(), e);
-        } catch (ParserException e) {
-            throw new CompilationException(CompilationException.formatError(source, sourceFile, e.rawMessage(), e.line(), e.column(), "Parser"), e.line(), e.column(), e);
         } catch (CodeGenException e) {
-            throw new CompilationException(CompilationException.formatError(source, sourceFile, e.rawMessage(), e.line(), 1, "CodeGen"), e.line(), 1, e);
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title(e.rawMessage())
+                    .sourceFile(sourceFile)
+                    .at(e.line(), SourceLines.lineAt(source, e.line()))
+                    .build());
+        } catch (CompilationException e) {
+            throw e;
         } catch (RuntimeException e) {
             System.err.println("[Vanta] Unexpected failure compiling " + sourceFile + ": " + e);
             e.printStackTrace(System.err);
@@ -212,11 +216,11 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         List<CompilationUnit> parsed = new ArrayList<>(sources.size());
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             try {
-                List<Token> tokens = new Lexer(entry.getValue()).tokenize();
-                CompilationUnit cu = new Parser(tokens).parse();
+                List<Token> tokens = new Lexer(entry.getValue(), entry.getKey()).tokenize();
+                CompilationUnit cu = new Parser(tokens, entry.getValue(), entry.getKey()).parse();
                 skeletonGen.registerBatchTypes(cu);
                 parsed.add(cu);
-            } catch (LexerException | ParserException ignored) {
+            } catch (CompilationException ignored) {
                 // Let the full compile pass surface the error with a proper message.
             }
         }
@@ -231,10 +235,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     /**
      * Parallel variant of {@link #registerSignatureSkeletons}. Parsing + skeleton
      * emission are independent per file, so the whole pre-pass scales with the
-     * worker count instead of serialising on a single thread. The batch-type
-     * registration inside the shared {@link SkeletonGenerator}
-     * has to see every unit before any emission runs, so that step stays
-     * sequential on the submitting thread.
+     * worker count instead of serialising on a single thread.
      */
     public void registerSignatureSkeletonsParallel(@NotNull Map<String, String> sources, int workers) {
         if (sources.size() <= 1 || workers <= 1) {
@@ -255,9 +256,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 final int idx = i;
                 parseFutures.add(parsePool.submit(() -> {
                     try {
-                        List<Token> tokens = new Lexer(entries.get(idx).getValue()).tokenize();
-                        parsedArr[idx] = new Parser(tokens).parse();
-                    } catch (LexerException | ParserException ignored) {
+                        List<Token> tokens = new Lexer(entries.get(idx).getValue(), entries.get(idx).getKey()).tokenize();
+                        parsedArr[idx] = new Parser(tokens, entries.get(idx).getValue(), entries.get(idx).getKey()).parse();
+                    } catch (CompilationException ignored) {
                     }
                 }));
             }
