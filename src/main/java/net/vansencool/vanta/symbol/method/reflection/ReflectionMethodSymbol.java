@@ -67,6 +67,16 @@ public final class ReflectionMethodSymbol implements MethodSymbol {
     }
 
     @Override
+    public boolean isBridge() {
+        return method.isBridge();
+    }
+
+    @Override
+    public boolean isSynthetic() {
+        return method.isSynthetic();
+    }
+
+    @Override
     public @NotNull List<TypeRef> parameterTypes() {
         if (cachedParameterTypes != null) return cachedParameterTypes;
         Type[] generic;

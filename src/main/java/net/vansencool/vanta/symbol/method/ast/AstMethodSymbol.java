@@ -77,6 +77,16 @@ public final class AstMethodSymbol implements MethodSymbol {
     }
 
     @Override
+    public boolean isBridge() {
+        return false;
+    }
+
+    @Override
+    public boolean isSynthetic() {
+        return (declaration.modifiers() & Opcodes.ACC_SYNTHETIC) != 0;
+    }
+
+    @Override
     public @NotNull List<TypeRef> parameterTypes() {
         if (cachedParameterTypes != null) return cachedParameterTypes;
         Set<String> scope = combinedTypeVariables();

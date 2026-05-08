@@ -1,87 +1,92 @@
-package net.vansencool.vanta.symbol.method.asm;
+package net.vansencool.vanta.symbol.method.reflection;
 
-import net.vansencool.vanta.classpath.AsmClassInfo;
 import net.vansencool.vanta.symbol.Position;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
 import net.vansencool.vanta.symbol.type.TypeRef;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
-import net.vansencool.vanta.symbol.type.ref.build.RefFromDescriptor;
+import net.vansencool.vanta.symbol.type.ref.build.RefFromReflection;
+import net.vansencool.vanta.symbol.type.ref.primitive.PrimitiveRef;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class AsmMethodSymbol implements MethodSymbol {
+public final class ReflectionConstructorSymbol implements MethodSymbol {
 
-    private final @NotNull AsmClassInfo.MethodInfo info;
+    private final @NotNull Constructor<?> ctor;
     private final @NotNull TypeSymbol owner;
+    private final @NotNull String descriptor;
     private @Nullable List<TypeRef> cachedParameterTypes;
-    private @Nullable TypeRef cachedReturnType;
 
-    public AsmMethodSymbol(@NotNull AsmClassInfo.MethodInfo info, @NotNull TypeSymbol owner) {
-        this.info = info;
+    public ReflectionConstructorSymbol(@NotNull Constructor<?> ctor, @NotNull TypeSymbol owner, @NotNull String descriptor) {
+        this.ctor = ctor;
         this.owner = owner;
+        this.descriptor = descriptor;
     }
 
     @Override
     public @NotNull String name() {
-        return info.name();
+        return "<init>";
     }
 
     @Override
     public @NotNull String descriptor() {
-        return info.descriptor();
+        return descriptor;
     }
 
     @Override
     public int access() {
-        return info.access();
+        return ctor.getModifiers();
     }
 
     @Override
     public boolean isStatic() {
-        return (info.access() & Opcodes.ACC_STATIC) != 0;
+        return false;
     }
 
     @Override
     public boolean isAbstract() {
-        return (info.access() & Opcodes.ACC_ABSTRACT) != 0;
+        return false;
     }
 
     @Override
     public boolean isVarargs() {
-        return info.isVarArgs();
+        return ctor.isVarArgs();
     }
 
     @Override
     public boolean isBridge() {
-        return (info.access() & Opcodes.ACC_BRIDGE) != 0;
+        return false;
     }
 
     @Override
     public boolean isSynthetic() {
-        return (info.access() & Opcodes.ACC_SYNTHETIC) != 0;
+        return ctor.isSynthetic();
     }
 
     @Override
     public @NotNull List<TypeRef> parameterTypes() {
         if (cachedParameterTypes != null) return cachedParameterTypes;
-        Type[] params = Type.getArgumentTypes(info.descriptor());
-        List<TypeRef> out = new ArrayList<>(params.length);
-        for (Type p : params) out.add(RefFromDescriptor.from(p.getDescriptor()));
+        Type[] generic;
+        try {
+            generic = ctor.getGenericParameterTypes();
+        } catch (Throwable ignored) {
+            generic = ctor.getParameterTypes();
+        }
+        List<TypeRef> out = new ArrayList<>(generic.length);
+        for (Type t : generic) out.add(RefFromReflection.from(t));
         cachedParameterTypes = List.copyOf(out);
         return cachedParameterTypes;
     }
 
     @Override
     public @NotNull TypeRef returnType() {
-        if (cachedReturnType != null) return cachedReturnType;
-        cachedReturnType = RefFromDescriptor.from(Type.getReturnType(info.descriptor()).getDescriptor());
-        return cachedReturnType;
+        return new PrimitiveRef("V");
     }
 
     @Override
@@ -97,5 +102,9 @@ public final class AsmMethodSymbol implements MethodSymbol {
     @Override
     public @NotNull TypeSymbol owner() {
         return owner;
+    }
+
+    public @NotNull Constructor<?> reflective() {
+        return ctor;
     }
 }

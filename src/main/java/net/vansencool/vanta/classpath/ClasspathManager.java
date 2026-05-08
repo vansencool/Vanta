@@ -1,5 +1,6 @@
 package net.vansencool.vanta.classpath;
 
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Type;
@@ -53,6 +54,7 @@ public final class ClasspathManager {
     private int sharedMethodPoolSize;
     private @Nullable URLClassLoader userClassLoader;
     private @Nullable InMemoryClassLoader inMemoryLoaderInstance;
+    private volatile @Nullable TypeRegistry typeRegistry;
 
     /**
      * Creates a classpath manager with no entries.
@@ -60,6 +62,21 @@ public final class ClasspathManager {
     public ClasspathManager() {
         this.classpathEntries = new ArrayList<>();
         this.cache = new ConcurrentHashMap<>();
+    }
+
+    /**
+     * Lazily creates and returns the {@link TypeRegistry} attached to this
+     * classpath manager. Compile drivers register parsed sources on the
+     * returned registry before invoking the resolver so cross file types
+     * resolve through symbols instead of reflection.
+     */
+    public @NotNull TypeRegistry typeRegistry() {
+        TypeRegistry local = typeRegistry;
+        if (local != null) return local;
+        synchronized (this) {
+            if (typeRegistry == null) typeRegistry = new TypeRegistry(this);
+            return typeRegistry;
+        }
     }
 
     /**

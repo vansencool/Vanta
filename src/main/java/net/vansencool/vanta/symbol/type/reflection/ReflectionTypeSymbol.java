@@ -5,13 +5,16 @@ import net.vansencool.vanta.symbol.Position;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.reflection.ReflectionFieldSymbol;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.method.reflection.ReflectionConstructorSymbol;
 import net.vansencool.vanta.symbol.method.reflection.ReflectionMethodSymbol;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.objectweb.asm.Type;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -100,11 +103,20 @@ public final class ReflectionTypeSymbol implements TypeSymbol {
     public @NotNull List<MethodSymbol> methods() {
         if (cachedMethods != null) return cachedMethods;
         Method[] declared = classpathManager.cachedMethods(clazz);
-        List<MethodSymbol> out = new ArrayList<>(declared.length);
+        Constructor<?>[] ctors;
+        try {
+            ctors = classpathManager.cachedDeclaredConstructors(clazz);
+        } catch (LinkageError e) {
+            ctors = new Constructor<?>[0];
+        }
+        List<MethodSymbol> out = new ArrayList<>(declared.length + ctors.length);
         for (Method m : declared) {
-            if (m.isBridge() || m.isSynthetic()) continue;
             String descriptor = classpathManager.methodDescriptor(m);
             out.add(new ReflectionMethodSymbol(m, this, descriptor));
+        }
+        for (Constructor<?> c : ctors) {
+            String descriptor = Type.getConstructorDescriptor(c);
+            out.add(new ReflectionConstructorSymbol(c, this, descriptor));
         }
         cachedMethods = List.copyOf(out);
         return cachedMethods;

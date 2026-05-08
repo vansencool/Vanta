@@ -128,7 +128,7 @@ public final class MethodResolutionHelper {
                 if (Modifier.isPrivate(mods)) continue;
                 String desc = ctx.methodResolver().classpathManager().methodDescriptor(m);
                 int op = Modifier.isStatic(mods) ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
-                return new MethodResolver.ResolvedMethod(ctx.classInternalName(), methodName, desc, op, false, m);
+                return new MethodResolver.ResolvedMethod(ctx.classInternalName(), methodName, desc, op, false);
             }
             try {
                 c = c.getSuperclass();

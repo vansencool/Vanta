@@ -23,6 +23,10 @@ public interface MethodSymbol {
 
     boolean isVarargs();
 
+    boolean isBridge();
+
+    boolean isSynthetic();
+
     @NotNull List<TypeRef> parameterTypes();
 
     @NotNull TypeRef returnType();
