@@ -99,7 +99,8 @@ public final class AstConstructorSymbol implements MethodSymbol {
         if (cachedParameterTypes != null) return cachedParameterTypes;
         List<TypeRef> out = new ArrayList<>();
         if (enclosingOuterInternal != null) out.add(TypeRefs.ofObject(enclosingOuterInternal));
-        for (Parameter p : declaration.parameters()) out.add(RefFromAst.from(p.type(), typeResolver, typeVariables, typeVariableErasures));
+        for (Parameter p : declaration.parameters())
+            out.add(RefFromAst.from(p.type(), typeResolver, typeVariables, typeVariableErasures));
         cachedParameterTypes = List.copyOf(out);
         return cachedParameterTypes;
     }

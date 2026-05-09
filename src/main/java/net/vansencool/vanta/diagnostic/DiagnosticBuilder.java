@@ -8,6 +8,10 @@ import java.util.List;
 
 public final class DiagnosticBuilder {
 
+    private final @NotNull List<SubHighlight> subHighlights = new ArrayList<>();
+    private final @NotNull List<ContextLine> contextLines = new ArrayList<>();
+    private final @NotNull List<String> notes = new ArrayList<>();
+    private final @NotNull List<String> helpLines = new ArrayList<>();
     private @NotNull Severity severity = Severity.ERROR;
     private @NotNull String title = "";
     private @Nullable String sourceFile = null;
@@ -16,10 +20,6 @@ public final class DiagnosticBuilder {
     private int columnStart = -1;
     private int columnEnd = -1;
     private @Nullable String underlineLabel = null;
-    private final @NotNull List<SubHighlight> subHighlights = new ArrayList<>();
-    private final @NotNull List<ContextLine> contextLines = new ArrayList<>();
-    private final @NotNull List<String> notes = new ArrayList<>();
-    private final @NotNull List<String> helpLines = new ArrayList<>();
 
     DiagnosticBuilder() {
     }

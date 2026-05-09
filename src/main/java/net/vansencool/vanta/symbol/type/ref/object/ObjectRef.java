@@ -12,10 +12,7 @@ import java.util.List;
  * A reference to a class, interface, enum, or record. Carries optional
  * generic type arguments.
  */
-public final class ObjectRef implements TypeRef {
-
-    private final @NotNull String internalName;
-    private final @NotNull List<TypeRef> typeArguments;
+public record ObjectRef(@NotNull String internalName, @NotNull List<TypeRef> typeArguments) implements TypeRef {
 
     public ObjectRef(@NotNull String internalName) {
         this(internalName, List.of());
@@ -32,18 +29,8 @@ public final class ObjectRef implements TypeRef {
     }
 
     @Override
-    public @NotNull String internalName() {
-        return internalName;
-    }
-
-    @Override
     public int arrayDimensions() {
         return 0;
-    }
-
-    @Override
-    public @NotNull List<TypeRef> typeArguments() {
-        return typeArguments;
     }
 
     @Override

@@ -77,7 +77,10 @@ public final class AstMethodSymbol implements MethodSymbol {
 
     @Override
     public boolean isAbstract() {
-        return (declaration.modifiers() & Opcodes.ACC_ABSTRACT) != 0 || declaration.body() == null && !owner.isInterface();
+        if ((declaration.modifiers() & Opcodes.ACC_ABSTRACT) != 0) return true;
+        if (declaration.body() != null) return false;
+        if (isStatic()) return false;
+        return owner.isInterface();
     }
 
     @Override
@@ -151,7 +154,8 @@ public final class AstMethodSymbol implements MethodSymbol {
     }
 
     private @NotNull Map<String, String> combinedErasures() {
-        if (declaration.typeParameters() == null || declaration.typeParameters().isEmpty()) return outerTypeVariableErasures;
+        if (declaration.typeParameters() == null || declaration.typeParameters().isEmpty())
+            return outerTypeVariableErasures;
         Map<String, String> combined = new HashMap<>(outerTypeVariableErasures);
         for (TypeParameter tp : declaration.typeParameters()) {
             combined.put(tp.name(), erasureOf(tp));

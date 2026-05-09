@@ -13,38 +13,9 @@ import org.objectweb.asm.Opcodes;
  * {@code $VALUES} array, record components projected as fields). Carries a
  * fixed type and access mask, no AST or reflection backing.
  */
-public final class SyntheticFieldSymbol implements FieldSymbol {
-
-    private final @NotNull String name;
-    private final @NotNull TypeRef type;
-    private final int access;
-    private final @Nullable Object constantValue;
-    private final @NotNull TypeSymbol owner;
-    private final @Nullable Position sourcePosition;
-
-    public SyntheticFieldSymbol(@NotNull String name, @NotNull TypeRef type, int access, @Nullable Object constantValue, @NotNull TypeSymbol owner, @Nullable Position sourcePosition) {
-        this.name = name;
-        this.type = type;
-        this.access = access;
-        this.constantValue = constantValue;
-        this.owner = owner;
-        this.sourcePosition = sourcePosition;
-    }
-
-    @Override
-    public @NotNull String name() {
-        return name;
-    }
-
-    @Override
-    public @NotNull TypeRef type() {
-        return type;
-    }
-
-    @Override
-    public int access() {
-        return access;
-    }
+public record SyntheticFieldSymbol(@NotNull String name, @NotNull TypeRef type, int access,
+                                   @Nullable Object constantValue, @NotNull TypeSymbol owner,
+                                   @Nullable Position sourcePosition) implements FieldSymbol {
 
     @Override
     public boolean isStatic() {
@@ -54,20 +25,5 @@ public final class SyntheticFieldSymbol implements FieldSymbol {
     @Override
     public boolean isFinal() {
         return (access & Opcodes.ACC_FINAL) != 0;
-    }
-
-    @Override
-    public @Nullable Object constantValue() {
-        return constantValue;
-    }
-
-    @Override
-    public @Nullable Position sourcePosition() {
-        return sourcePosition;
-    }
-
-    @Override
-    public @NotNull TypeSymbol owner() {
-        return owner;
     }
 }

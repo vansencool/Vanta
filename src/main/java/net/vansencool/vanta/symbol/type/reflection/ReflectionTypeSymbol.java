@@ -2,6 +2,8 @@ package net.vansencool.vanta.symbol.type.reflection;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.symbol.Position;
+import net.vansencool.vanta.symbol.annotation.AnnotationInstance;
+import net.vansencool.vanta.symbol.annotation.reflection.ReflectionAnnotationInstance;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.reflection.ReflectionFieldSymbol;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
@@ -14,13 +16,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Type;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.TypeVariable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class ReflectionTypeSymbol implements TypeSymbol {
 
@@ -102,16 +107,29 @@ public final class ReflectionTypeSymbol implements TypeSymbol {
     @Override
     public @NotNull List<MethodSymbol> methods() {
         if (cachedMethods != null) return cachedMethods;
-        Method[] declared = classpathManager.cachedMethods(clazz);
+        Method[] publicMethods = classpathManager.cachedMethods(clazz);
+        Method[] declaredMethods;
+        try {
+            declaredMethods = clazz.getDeclaredMethods();
+        } catch (LinkageError e) {
+            declaredMethods = new Method[0];
+        }
         Constructor<?>[] ctors;
         try {
             ctors = classpathManager.cachedDeclaredConstructors(clazz);
         } catch (LinkageError e) {
             ctors = new Constructor<?>[0];
         }
-        List<MethodSymbol> out = new ArrayList<>(declared.length + ctors.length);
-        for (Method m : declared) {
+        List<MethodSymbol> out = new ArrayList<>(publicMethods.length + declaredMethods.length + ctors.length);
+        Set<String> seen = new HashSet<>();
+        for (Method m : publicMethods) {
             String descriptor = classpathManager.methodDescriptor(m);
+            seen.add(m.getName() + descriptor);
+            out.add(new ReflectionMethodSymbol(m, this, registry, descriptor));
+        }
+        for (Method m : declaredMethods) {
+            String descriptor = classpathManager.methodDescriptor(m);
+            if (!seen.add(m.getName() + descriptor)) continue;
             out.add(new ReflectionMethodSymbol(m, this, registry, descriptor));
         }
         for (Constructor<?> c : ctors) {
@@ -168,6 +186,19 @@ public final class ReflectionTypeSymbol implements TypeSymbol {
         for (TypeVariable<?> tv : variables) built.add(new ReflectionTypeParameterSymbol(tv));
         cachedTypeParameters = List.copyOf(built);
         return cachedTypeParameters;
+    }
+
+    @Override
+    public @NotNull List<AnnotationInstance> annotations() {
+        try {
+            Annotation[] declared = clazz.getDeclaredAnnotations();
+            if (declared.length == 0) return List.of();
+            List<AnnotationInstance> out = new ArrayList<>(declared.length);
+            for (Annotation a : declared) out.add(new ReflectionAnnotationInstance(a));
+            return List.copyOf(out);
+        } catch (Throwable ignored) {
+            return List.of();
+        }
     }
 
     @Override

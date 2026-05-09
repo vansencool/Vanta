@@ -265,7 +265,8 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                         boolean bMore = isMoreSpecific(registry, m.parameterTypes(), bestSymbol.parameterTypes(), null);
                         boolean replace = false;
                         if (mMore && !bMore) replace = true;
-                        else if (mMore && isReturnAssignable(bestSymbol.returnType(), m.returnType(), registry)) replace = true;
+                        else if (mMore && isReturnAssignable(bestSymbol.returnType(), m.returnType(), registry))
+                            replace = true;
                         if (replace) {
                             best = candidate;
                             bestSymbol = m;
@@ -422,7 +423,8 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                     boolean bMore = isMoreSpecific(registry, m.parameterTypes(), bestSymbol.parameterTypes(), argDescriptors);
                     boolean replace = false;
                     if (mMore && !bMore) replace = true;
-                    else if (mMore && isReturnAssignable(bestSymbol.returnType(), m.returnType(), registry)) replace = true;
+                    else if (mMore && isReturnAssignable(bestSymbol.returnType(), m.returnType(), registry))
+                        replace = true;
                     if (replace) {
                         best = candidate;
                         bestSymbol = m;

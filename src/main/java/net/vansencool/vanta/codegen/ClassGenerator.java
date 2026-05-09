@@ -109,8 +109,8 @@ public final class ClassGenerator {
         this.typeResolver = typeResolver;
         this.sourceFile = sourceFile;
         this.constantFolder = new ConstantFolder(typeResolver, classpathManager);
-        this.annotationEmitter = new AnnotationEmitter(typeResolver, classpathManager);
-        this.bridgeMethodEmitter = new BridgeMethodEmitter(typeResolver, classpathManager);
+        this.annotationEmitter = new AnnotationEmitter(typeResolver, classpathManager.typeRegistry());
+        this.bridgeMethodEmitter = new BridgeMethodEmitter(typeResolver, classpathManager.typeRegistry());
         this.classHeaderEmitter = new ClassHeaderEmitter(sourceFile, annotationEmitter);
         this.staticInitEmitter = new StaticInitEmitter(this);
         this.methodEmitter = new MethodEmitter(this);

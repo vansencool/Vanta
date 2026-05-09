@@ -63,21 +63,6 @@ public final class ClasspathManager {
     }
 
     /**
-     * Lazily creates and returns the {@link TypeRegistry} attached to this
-     * classpath manager. Compile drivers register parsed sources on the
-     * returned registry before invoking the resolver so cross file types
-     * resolve through symbols instead of reflection.
-     */
-    public @NotNull TypeRegistry typeRegistry() {
-        TypeRegistry local = typeRegistry;
-        if (local != null) return local;
-        synchronized (this) {
-            if (typeRegistry == null) typeRegistry = new TypeRegistry(this);
-            return typeRegistry;
-        }
-    }
-
-    /**
      * Returns public methods of the given class, or empty array if reflection triggers a LinkageError
      * (e.g. from transitively missing classes on the classpath).
      */
@@ -108,6 +93,21 @@ public final class ClasspathManager {
             return clazz.getField(name);
         } catch (NoSuchFieldException | LinkageError e) {
             return null;
+        }
+    }
+
+    /**
+     * Lazily creates and returns the {@link TypeRegistry} attached to this
+     * classpath manager. Compile drivers register parsed sources on the
+     * returned registry before invoking the resolver so cross file types
+     * resolve through symbols instead of reflection.
+     */
+    public @NotNull TypeRegistry typeRegistry() {
+        TypeRegistry local = typeRegistry;
+        if (local != null) return local;
+        synchronized (this) {
+            if (typeRegistry == null) typeRegistry = new TypeRegistry(this);
+            return typeRegistry;
         }
     }
 

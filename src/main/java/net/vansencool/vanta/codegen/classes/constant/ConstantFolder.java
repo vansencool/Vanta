@@ -1,7 +1,5 @@
 package net.vansencool.vanta.codegen.classes.constant;
 
-import net.vansencool.vanta.classpath.AsmClassInfo;
-import net.vansencool.vanta.classpath.AsmClassInfo.FieldInfo;
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.parser.ast.AstNode;
@@ -19,12 +17,11 @@ import net.vansencool.vanta.parser.ast.expression.ParenExpression;
 import net.vansencool.vanta.parser.ast.expression.UnaryExpression;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
+import net.vansencool.vanta.symbol.field.FieldSymbol;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 
 /**
  * Evaluates field initializers at compile time, producing values suitable for
@@ -205,34 +202,32 @@ public final class ConstantFolder {
     private @Nullable Object readConstFieldValue(@Nullable String ownerInternal, @NotNull String fieldName) {
         if (ownerInternal == null) ownerInternal = typeResolver.resolveStaticFieldOwner(fieldName);
         if (ownerInternal == null) return null;
-        Class<?> cls = classpathManager.loadClass(ownerInternal);
-        if (cls != null) {
-            Field f = ClasspathManager.safeGetField(cls, fieldName);
-            if (f != null && Modifier.isStatic(f.getModifiers()) && Modifier.isFinal(f.getModifiers())) {
-                try {
-                    Object v = f.get(null);
-                    if (v instanceof Integer || v instanceof Long || v instanceof Float || v instanceof Double || v instanceof String)
-                        return v;
-                    if (v instanceof Character c) return (int) c;
-                    if (v instanceof Short s) return (int) s;
-                    if (v instanceof Byte bt) return (int) bt;
-                    if (v instanceof Boolean bl) return bl ? 1 : 0;
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        AsmClassInfo info = classpathManager.asmClassInfo(ownerInternal);
-        if (info != null) {
-            for (FieldInfo fi : info.fields()) {
-                if (!fi.name().equals(fieldName)) continue;
-                int acc = fi.access();
-                if (!Modifier.isStatic(acc) || !Modifier.isFinal(acc)) continue;
-                Object v = fi.constantValue();
-                if (v instanceof Integer || v instanceof Long || v instanceof Float || v instanceof Double || v instanceof String)
-                    return v;
-            }
-        }
+        TypeSymbol owner = classpathManager.typeRegistry().lookup(ownerInternal);
+        if (owner == null) return null;
+        FieldSymbol field = findStaticFinal(owner, fieldName);
+        if (field == null) return null;
+        Object v = field.constantValue();
+        if (v instanceof Integer || v instanceof Long || v instanceof Float || v instanceof Double || v instanceof String)
+            return v;
+        if (v instanceof Character c) return (int) c;
+        if (v instanceof Short s) return (int) s;
+        if (v instanceof Byte bt) return (int) bt;
+        if (v instanceof Boolean bl) return bl ? 1 : 0;
         return null;
+    }
+
+    private @Nullable FieldSymbol findStaticFinal(@NotNull TypeSymbol owner, @NotNull String fieldName) {
+        for (FieldSymbol f : owner.fields()) {
+            if (!f.name().equals(fieldName)) continue;
+            if (!f.isStatic() || !f.isFinal()) return null;
+            return f;
+        }
+        for (TypeSymbol iface : owner.interfaces()) {
+            FieldSymbol found = findStaticFinal(iface, fieldName);
+            if (found != null) return found;
+        }
+        TypeSymbol sup = owner.superclass();
+        return sup != null ? findStaticFinal(sup, fieldName) : null;
     }
 
     /**

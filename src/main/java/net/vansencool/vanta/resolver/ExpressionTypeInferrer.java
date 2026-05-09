@@ -73,6 +73,15 @@ public final class ExpressionTypeInferrer {
         this.staticFields = new HashSet<>();
     }
 
+    private static boolean isPrimitiveWidening(@NotNull String from, @NotNull String to) {
+        if (from.equals(to)) return true;
+        String order = "BSIJFD";
+        int fi = order.indexOf(from);
+        int ti = order.indexOf(to);
+        if ("C".equals(from)) fi = order.indexOf("I") - 1;
+        return fi >= 0 && ti > fi;
+    }
+
     public void nestedClassMethods(@Nullable Map<String, Map<String, SelfMethodInfo>> nested) {
         this.nestedClassMethods = nested;
     }
@@ -169,7 +178,8 @@ public final class ExpressionTypeInferrer {
             case "S" -> ResolvedType.SHORT;
             case "C" -> ResolvedType.CHAR;
             default -> {
-                if (desc.startsWith("L") && desc.endsWith(";")) yield ResolvedType.ofObject(desc.substring(1, desc.length() - 1));
+                if (desc.startsWith("L") && desc.endsWith(";"))
+                    yield ResolvedType.ofObject(desc.substring(1, desc.length() - 1));
                 yield null;
             }
         };
@@ -302,7 +312,8 @@ public final class ExpressionTypeInferrer {
         if (!isVarargs) return true;
         TypeRef varargsParam = params.get(paramCount - 1);
         String varargsArrayDesc = varargsParam.descriptor();
-        if (argCount == paramCount && MethodResolver.isDescriptorAssignable(argDescs[argCount - 1], varargsArrayDesc)) return true;
+        if (argCount == paramCount && MethodResolver.isDescriptorAssignable(argDescs[argCount - 1], varargsArrayDesc))
+            return true;
         if (!varargsArrayDesc.startsWith("[")) return true;
         String varargsElemDesc = varargsArrayDesc.substring(1);
         boolean elemPrimitive = varargsElemDesc.length() == 1;
@@ -355,15 +366,6 @@ public final class ExpressionTypeInferrer {
         return candNarrower;
     }
 
-    private static boolean isPrimitiveWidening(@NotNull String from, @NotNull String to) {
-        if (from.equals(to)) return true;
-        String order = "BSIJFD";
-        int fi = order.indexOf(from);
-        int ti = order.indexOf(to);
-        if ("C".equals(from)) fi = order.indexOf("I") - 1;
-        return fi >= 0 && ti > fi;
-    }
-
     /**
      * Infers the type of an expression.
      */
@@ -387,7 +389,8 @@ public final class ExpressionTypeInferrer {
         if (expr instanceof SuperExpression) {
             if (superInternalName != null) return ResolvedType.ofObject(superInternalName);
             TypeSymbol selfSym = classpathManager.typeRegistry().lookup(classInternalName);
-            if (selfSym != null && selfSym.superclass() != null) return ResolvedType.ofObject(selfSym.superclass().internalName());
+            if (selfSym != null && selfSym.superclass() != null)
+                return ResolvedType.ofObject(selfSym.superclass().internalName());
             return ResolvedType.ofObject("java/lang/Object");
         }
         if (expr instanceof NewExpression newExpr) return typeResolver.resolve(newExpr.type());
@@ -453,7 +456,7 @@ public final class ExpressionTypeInferrer {
         String staticOwner = typeResolver.resolveStaticFieldOwner(name.name());
         if (staticOwner != null) {
             ResolvedType staticField = lookupField(staticOwner, name.name(), null);
-            if (staticField != null) return staticField;
+            return staticField;
         }
         return null;
     }
@@ -664,7 +667,8 @@ public final class ExpressionTypeInferrer {
             return classFields.get(fieldAccess.fieldName());
         }
         ResolvedType targetType = infer(fieldAccess.target());
-        if (targetType != null && targetType.isArray() && "length".equals(fieldAccess.fieldName())) return ResolvedType.INT;
+        if (targetType != null && targetType.isArray() && "length".equals(fieldAccess.fieldName()))
+            return ResolvedType.INT;
         if (targetType == null && fieldAccess.target() instanceof NameExpression nameTarget && scope.resolve(nameTarget.name()) == null) {
             ResolvedType resolved = typeResolver.resolve(new TypeNode(nameTarget.name(), null, 0, fieldAccess.line()));
             if (resolved.internalName() != null) targetType = resolved;

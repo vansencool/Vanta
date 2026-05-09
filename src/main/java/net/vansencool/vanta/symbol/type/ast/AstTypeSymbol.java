@@ -1,6 +1,7 @@
 package net.vansencool.vanta.symbol.type.ast;
 
 import net.vansencool.vanta.parser.ast.AstNode;
+import net.vansencool.vanta.parser.ast.declaration.AnnotationNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.EnumConstant;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
@@ -12,11 +13,11 @@ import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.parser.ast.type.TypeParameter;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.symbol.Position;
+import net.vansencool.vanta.symbol.annotation.AnnotationInstance;
+import net.vansencool.vanta.symbol.annotation.ast.AstAnnotationInstance;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.ast.AstFieldSymbol;
 import net.vansencool.vanta.symbol.field.synth.SyntheticFieldSymbol;
-import net.vansencool.vanta.symbol.type.ref.TypeRefs;
-import net.vansencool.vanta.symbol.type.ref.build.RefFromAst;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.symbol.method.ast.AstConstructorSymbol;
 import net.vansencool.vanta.symbol.method.ast.AstMethodSymbol;
@@ -24,6 +25,8 @@ import net.vansencool.vanta.symbol.method.synth.SyntheticDefaultConstructor;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
+import net.vansencool.vanta.symbol.type.ref.TypeRefs;
+import net.vansencool.vanta.symbol.type.ref.build.RefFromAst;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
@@ -204,6 +207,16 @@ public final class AstTypeSymbol implements TypeSymbol {
         }
         cachedTypeParameters = List.copyOf(built);
         return cachedTypeParameters;
+    }
+
+    @Override
+    public @NotNull List<AnnotationInstance> annotations() {
+        if (declaration.annotations().isEmpty()) return List.of();
+        List<AnnotationInstance> out = new ArrayList<>(declaration.annotations().size());
+        for (AnnotationNode ann : declaration.annotations()) {
+            out.add(new AstAnnotationInstance(ann, typeResolver));
+        }
+        return List.copyOf(out);
     }
 
     @Override

@@ -1,6 +1,7 @@
 package net.vansencool.vanta.symbol.type;
 
 import net.vansencool.vanta.symbol.Position;
+import net.vansencool.vanta.symbol.annotation.AnnotationInstance;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
 import org.jetbrains.annotations.NotNull;
@@ -39,6 +40,8 @@ public interface TypeSymbol {
     @NotNull List<TypeSymbol> nestedTypes();
 
     @NotNull List<TypeParameterSymbol> typeParameters();
+
+    @NotNull List<AnnotationInstance> annotations();
 
     @Nullable Position sourcePosition();
 }

@@ -11,18 +11,7 @@ import java.util.List;
 /**
  * A reference to a JVM primitive ({@code int}, {@code long}, etc.).
  */
-public final class PrimitiveRef implements TypeRef {
-
-    private final @NotNull String descriptor;
-
-    public PrimitiveRef(@NotNull String descriptor) {
-        this.descriptor = descriptor;
-    }
-
-    @Override
-    public @NotNull String descriptor() {
-        return descriptor;
-    }
+public record PrimitiveRef(@NotNull String descriptor) implements TypeRef {
 
     @Override
     public @Nullable String internalName() {

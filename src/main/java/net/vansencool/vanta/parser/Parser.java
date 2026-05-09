@@ -81,11 +81,11 @@ import static net.vansencool.vanta.lexer.token.TokenType.*;
  */
 public final class Parser {
 
+    private final @NotNull String source;
+    private final @Nullable String sourceFile;
     private @NotNull Token @NotNull [] tokens;
     private int tokenCount;
     private int pos;
-    private final @NotNull String source;
-    private final @Nullable String sourceFile;
     private int speculativeDepth;
 
     public Parser(@NotNull List<Token> tokens) {
@@ -98,6 +98,27 @@ public final class Parser {
         this.pos = 0;
         this.source = source;
         this.sourceFile = sourceFile;
+    }
+
+    private static @NotNull String tokenDisplay(@NotNull TokenType type) {
+        return switch (type) {
+            case LEFT_PAREN -> "(";
+            case RIGHT_PAREN -> ")";
+            case LEFT_BRACE -> "{";
+            case RIGHT_BRACE -> "}";
+            case LEFT_BRACKET -> "[";
+            case RIGHT_BRACKET -> "]";
+            case SEMICOLON -> ";";
+            case COMMA -> ",";
+            case DOT -> ".";
+            case COLON -> ":";
+            case ARROW -> "->";
+            case ASSIGN -> "=";
+            case GREATER -> ">";
+            case LESS -> "<";
+            case AT -> "@";
+            default -> type.name().toLowerCase().replace('_', ' ');
+        };
     }
 
     /**
@@ -2420,26 +2441,5 @@ public final class Parser {
      */
     private boolean isIdentifierLike(@NotNull TokenType type) {
         return type == IDENTIFIER || type == RECORD || type == VAR || type == YIELD;
-    }
-
-    private static @NotNull String tokenDisplay(@NotNull TokenType type) {
-        return switch (type) {
-            case LEFT_PAREN -> "(";
-            case RIGHT_PAREN -> ")";
-            case LEFT_BRACE -> "{";
-            case RIGHT_BRACE -> "}";
-            case LEFT_BRACKET -> "[";
-            case RIGHT_BRACKET -> "]";
-            case SEMICOLON -> ";";
-            case COMMA -> ",";
-            case DOT -> ".";
-            case COLON -> ":";
-            case ARROW -> "->";
-            case ASSIGN -> "=";
-            case GREATER -> ">";
-            case LESS -> "<";
-            case AT -> "@";
-            default -> type.name().toLowerCase().replace('_', ' ');
-        };
     }
 }

@@ -2,6 +2,7 @@ package net.vansencool.vanta.symbol.type.asm;
 
 import net.vansencool.vanta.classpath.AsmClassInfo;
 import net.vansencool.vanta.symbol.Position;
+import net.vansencool.vanta.symbol.annotation.AnnotationInstance;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.asm.AsmFieldSymbol;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
@@ -111,6 +112,11 @@ public final class AsmTypeSymbol implements TypeSymbol {
 
     @Override
     public @NotNull List<TypeParameterSymbol> typeParameters() {
+        return List.of();
+    }
+
+    @Override
+    public @NotNull List<AnnotationInstance> annotations() {
         return List.of();
     }
 

@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Rust styled compiler diagnostic.
- *
+ * <p>
  * Construct via {@link DiagnosticBuilder}.
  */
 public final class Diagnostic {

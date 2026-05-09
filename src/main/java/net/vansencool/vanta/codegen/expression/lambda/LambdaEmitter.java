@@ -9,7 +9,6 @@ import net.vansencool.vanta.codegen.classes.visitor.RecordingMethodVisitor;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
-import net.vansencool.vanta.codegen.expression.util.desc.DescriptorUtils;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
@@ -20,12 +19,15 @@ import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.expression.ThisExpression;
 import net.vansencool.vanta.parser.ast.statement.BlockStatement;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
-import net.vansencool.vanta.symbol.method.MethodSymbol;
-import net.vansencool.vanta.symbol.type.TypeSymbol;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.scope.Scope;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
+import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
+import net.vansencool.vanta.symbol.type.TypeRef;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.ClassWriter;
@@ -34,12 +36,6 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.TypeVariable;
-import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -52,35 +48,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Emits bytecode for lambda expressions and method references. Both lower to
  * an {@code invokedynamic} call through {@link java.lang.invoke.LambdaMetafactory},
- * so this class concentrates: SAM method discovery and generic-param
+ * so this class concentrates: SAM method discovery and generic param
  * resolution, capture analysis over the lambda body, emission of the
  * synthetic {@code lambda$<enclosing>$N} backing method, and assembly of
- * the final {@code invokedynamic} instruction. Shared scanning helpers
- * (sub-expression walks, anon-capture collection) live on
- * {@link ExpressionGenerator} since they're reused by anonymous-class
- * emission.
+ * the final {@code invokedynamic} instruction.
  */
 public final class LambdaEmitter {
 
+    private static final Set<String> OBJECT_METHODS_BY_ARITY = Set.of(
+            "equals:1", "hashCode:0", "toString:0", "getClass:0",
+            "wait:0", "wait:1", "wait:2", "notify:0", "notifyAll:0", "clone:0", "finalize:0"
+    );
+
     private final @NotNull ExpressionGenerator exprGen;
 
-    /**
-     * @param exprGen expression generator whose context, generators, and
-     *                sub-expression collectors this emitter reuses
-     */
     public LambdaEmitter(@NotNull ExpressionGenerator exprGen) {
         this.exprGen = exprGen;
     }
 
-    /**
-     * Shallow JVM descriptor validator. Guards against splicing
-     * malformed descriptors like {@code L?;} into a synthetic
-     * {@code makeConcatWithConstants} bootstrap where they would break
-     * downstream StackMapTable computation.
-     *
-     * @param desc candidate descriptor, possibly from type inference
-     * @return true when {@code desc} is a well-formed field descriptor
-     */
     public static boolean isValidDescriptor(@Nullable String desc) {
         if (desc == null || desc.isEmpty()) return false;
         int i = 0;
@@ -98,14 +83,6 @@ public final class LambdaEmitter {
         return semi > i + 1;
     }
 
-    /**
-     * True when {@code internal} looks like an anon-class internal name
-     * ({@code Outer$<digits>}). Used when flattening nested anon class
-     * numbering back to the real enclosing class.
-     *
-     * @param internal class internal name
-     * @return true when the tail after the last {@code $} is all digits
-     */
     public static boolean endsWithAnonSuffix(@NotNull String internal) {
         int dollar = internal.lastIndexOf('$');
         if (dollar < 0 || dollar == internal.length() - 1) return false;
@@ -115,16 +92,6 @@ public final class LambdaEmitter {
         return true;
     }
 
-    /**
-     * Emits bytecode for a method reference, resolving the target method
-     * (or constructor) against the current classpath, picking the right
-     * {@code Handle} tag (static/virtual/interface/newinvokespecial), and
-     * issuing the matching {@code invokedynamic} against
-     * {@code LambdaMetafactory#metafactory}.
-     *
-     * @param ref        method reference expression
-     * @param targetType functional-interface type the reference flows into
-     */
     public void emitMethodReference(@NotNull MethodReferenceExpression ref, @Nullable ResolvedType targetType) {
         MethodContext ctx = exprGen.ctx();
         if (targetType == null || targetType.internalName() == null) {
@@ -132,37 +99,15 @@ public final class LambdaEmitter {
         }
         ClassWriter cw = ctx.classWriter();
         if (cw == null) throw new CodeGenException("Method references require class level context", ref.line());
-        Class<?> ifaceClass = ctx.methodResolver().classpathManager().loadClass(targetType.internalName());
-        Method samMethod = null;
-        String samName;
-        String samDescriptor;
-        if (ifaceClass != null) {
-            for (Method m : ctx.methodResolver().classpathManager().cachedMethods(ifaceClass)) {
-                if (!Modifier.isAbstract(m.getModifiers())) continue;
-                if (isOverrideOfObjectMethod(m)) continue;
-                samMethod = m;
-                break;
-            }
-            if (samMethod == null)
-                throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
-            samName = samMethod.getName();
-            samDescriptor = Type.getMethodDescriptor(samMethod);
-        } else {
-            TypeSymbol ifaceSym = ctx.methodResolver().classpathManager().typeRegistry().lookup(targetType.internalName());
-            if (ifaceSym == null)
-                throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
-            MethodSymbol samSym = null;
-            for (MethodSymbol m : ifaceSym.methods()) {
-                if (!m.isAbstract()) continue;
-                if (m.isStatic()) continue;
-                samSym = m;
-                break;
-            }
-            if (samSym == null)
-                throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
-            samName = samSym.name();
-            samDescriptor = samSym.descriptor();
-        }
+        TypeSymbol ifaceSym = registry().lookup(targetType.internalName());
+        if (ifaceSym == null)
+            throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
+        MethodSymbol samSym = findSam(ifaceSym);
+        if (samSym == null)
+            throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
+        String samName = samSym.name();
+        String samDescriptor = samSym.descriptor();
+        int samArity = samSym.parameterTypes().size();
 
         boolean isCtorRef = "new".equals(ref.methodName());
         String refTargetName = null;
@@ -177,10 +122,10 @@ public final class LambdaEmitter {
         LocalVariable receiverLocal = refTargetName != null ? ctx.scope().resolve(refTargetName) : null;
         boolean refTargetIsType = receiverLocal == null && refTargetType != null && refTargetType.internalName() != null
                 && !"I".equals(refTargetType.descriptor());
-        boolean refTargetLoadable = refTargetIsType && ctx.methodResolver().classpathManager().loadClass(refTargetType.internalName()) != null;
+        TypeSymbol refTargetSym = refTargetIsType ? registry().lookup(refTargetType.internalName()) : null;
 
-        Method targetMethod = null;
-        Constructor<?> targetCtor = null;
+        MethodSymbol targetSym = null;
+        boolean targetIsCtor = false;
         boolean isStaticTarget = false;
         boolean isUnboundInstanceRef = false;
 
@@ -188,44 +133,38 @@ public final class LambdaEmitter {
         String fallbackDescriptor = null;
         boolean fallbackIsStatic = false;
         boolean fallbackIsCtor = false;
-        if (isCtorRef && refTargetLoadable) {
-            Class<?> cls = ctx.methodResolver().classpathManager().loadClass(refTargetType.internalName());
-            if (cls == null)
-                throw new CodeGenException("Cannot load class " + refTargetType.internalName(), ref.line());
-            int want = samMethod.getParameterCount();
-            for (Constructor<?> c : ctx.methodResolver().classpathManager().cachedDeclaredConstructors(cls)) {
-                if (c.getParameterCount() == want) {
-                    targetCtor = c;
-                    break;
-                }
+
+        if (isCtorRef && refTargetSym != null) {
+            for (MethodSymbol m : refTargetSym.methods()) {
+                if (!"<init>".equals(m.name())) continue;
+                if (m.parameterTypes().size() != samArity) continue;
+                targetSym = m;
+                targetIsCtor = true;
+                break;
             }
-            if (targetCtor == null)
+            if (targetSym == null)
                 throw new CodeGenException("No matching constructor for " + refTargetType.internalName(), ref.line());
         } else if (isCtorRef && refTargetIsType) {
             fallbackIsCtor = true;
             fallbackOwnerInternal = refTargetType.internalName();
             StringBuilder sb = new StringBuilder("(");
-            for (Class<?> p : samMethod.getParameterTypes()) sb.append(Type.getDescriptor(p));
+            for (TypeRef p : samSym.parameterTypes()) sb.append(p.descriptor());
             sb.append(")V");
             fallbackDescriptor = sb.toString();
-        } else if (refTargetLoadable) {
-            Class<?> cls = ctx.methodResolver().classpathManager().loadClass(refTargetType.internalName());
-            if (cls == null)
-                throw new CodeGenException("Cannot load class " + refTargetType.internalName(), ref.line());
-            int samArity = samMethod.getParameterCount();
-            Method staticMatch = null, instMatch = null;
-            for (Method m : ctx.methodResolver().classpathManager().cachedMethods(cls)) {
-                if (!m.getName().equals(ref.methodName())) continue;
-                if (Modifier.isStatic(m.getModifiers()) && m.getParameterCount() == samArity && staticMatch == null)
-                    staticMatch = m;
-                else if (!Modifier.isStatic(m.getModifiers()) && m.getParameterCount() == samArity - 1 && instMatch == null)
-                    instMatch = m;
+        } else if (refTargetSym != null) {
+            MethodSymbol staticMatch = null;
+            MethodSymbol instMatch = null;
+            for (MethodSymbol m : allMethodsIncludingSupers(refTargetSym)) {
+                if (!m.name().equals(ref.methodName())) continue;
+                int arity = m.parameterTypes().size();
+                if (m.isStatic() && arity == samArity && staticMatch == null) staticMatch = m;
+                else if (!m.isStatic() && arity == samArity - 1 && instMatch == null) instMatch = m;
             }
             if (staticMatch != null) {
-                targetMethod = staticMatch;
+                targetSym = staticMatch;
                 isStaticTarget = true;
             } else if (instMatch != null) {
-                targetMethod = instMatch;
+                targetSym = instMatch;
                 isUnboundInstanceRef = true;
             } else
                 throw new CodeGenException("No matching method " + ref.methodName() + " in " + refTargetType.internalName(), ref.line());
@@ -233,11 +172,11 @@ public final class LambdaEmitter {
             fallbackOwnerInternal = refTargetType.internalName();
             fallbackIsStatic = true;
             StringBuilder sb = new StringBuilder("(");
-            for (Class<?> p : samMethod.getParameterTypes()) sb.append(Type.getDescriptor(p));
-            sb.append(")").append(Type.getDescriptor(samMethod.getReturnType()));
+            for (TypeRef p : samSym.parameterTypes()) sb.append(p.descriptor());
+            sb.append(")").append(samSym.returnType().descriptor());
             fallbackDescriptor = sb.toString();
             if (refTargetType.internalName().equals(ctx.classInternalName())) {
-                SelfMethodInfo info = ctx.selfMethods().get(ref.methodName() + ":" + samMethod.getParameterCount());
+                SelfMethodInfo info = ctx.selfMethods().get(ref.methodName() + ":" + samArity);
                 if (info != null) {
                     fallbackDescriptor = info.descriptor();
                     fallbackIsStatic = info.isStatic();
@@ -247,16 +186,15 @@ public final class LambdaEmitter {
             ResolvedType recvType = ctx.typeInferrer().infer(ref.target());
             if (recvType == null || recvType.internalName() == null)
                 throw new CodeGenException("Cannot resolve method reference receiver", ref.line());
-            Class<?> cls = ctx.methodResolver().classpathManager().loadClass(recvType.internalName());
-            if (cls == null) throw new CodeGenException("Cannot load: " + recvType.internalName(), ref.line());
-            int samArity = samMethod.getParameterCount();
-            for (Method m : ctx.methodResolver().classpathManager().cachedMethods(cls)) {
-                if (m.getName().equals(ref.methodName()) && m.getParameterCount() == samArity) {
-                    targetMethod = m;
+            TypeSymbol recvSym = registry().lookup(recvType.internalName());
+            if (recvSym == null) throw new CodeGenException("Cannot load: " + recvType.internalName(), ref.line());
+            for (MethodSymbol m : allMethodsIncludingSupers(recvSym)) {
+                if (m.name().equals(ref.methodName()) && m.parameterTypes().size() == samArity) {
+                    targetSym = m;
                     break;
                 }
             }
-            if (targetMethod == null) throw new CodeGenException("No matching method " + ref.methodName(), ref.line());
+            if (targetSym == null) throw new CodeGenException("No matching method " + ref.methodName(), ref.line());
         }
 
         Handle implHandle;
@@ -270,30 +208,34 @@ public final class LambdaEmitter {
                 lambdaDescriptor = fallbackDescriptor;
                 isStaticTarget = fallbackIsStatic;
             }
-        } else if (targetCtor != null) {
-            implHandle = new Handle(Opcodes.H_NEWINVOKESPECIAL, refTargetType.internalName(), "<init>", Type.getConstructorDescriptor(targetCtor), false);
-            lambdaDescriptor = "(" + descriptorOf(targetCtor.getParameterTypes()) + ")L" + refTargetType.internalName() + ";";
+        } else if (targetIsCtor) {
+            String ctorDescriptor = targetSym.descriptor();
+            implHandle = new Handle(Opcodes.H_NEWINVOKESPECIAL, refTargetType.internalName(), "<init>", ctorDescriptor, false);
+            lambdaDescriptor = ctorDescriptor.substring(0, ctorDescriptor.indexOf(')') + 1) + "L" + refTargetType.internalName() + ";";
         } else {
-            String ownerInternal = targetMethod.getDeclaringClass().getName().replace('.', '/');
-            boolean isInterface = targetMethod.getDeclaringClass().isInterface();
+            String ownerInternal = targetSym.owner().internalName();
+            boolean isInterface = targetSym.owner().isInterface();
             int handleTag;
-            String implDesc = Type.getMethodDescriptor(targetMethod);
+            String implDesc = targetSym.descriptor();
             if (isStaticTarget) {
                 handleTag = Opcodes.H_INVOKESTATIC;
                 lambdaDescriptor = implDesc;
             } else if (isUnboundInstanceRef) {
                 handleTag = isInterface ? Opcodes.H_INVOKEINTERFACE : Opcodes.H_INVOKEVIRTUAL;
-                lambdaDescriptor = "(L" + ownerInternal + ";" + descriptorOf(targetMethod.getParameterTypes()) + ")" + Type.getDescriptor(targetMethod.getReturnType());
+                StringBuilder sb = new StringBuilder("(L").append(ownerInternal).append(";");
+                for (TypeRef p : targetSym.parameterTypes()) sb.append(p.descriptor());
+                sb.append(")").append(targetSym.returnType().descriptor());
+                lambdaDescriptor = sb.toString();
             } else {
                 handleTag = isInterface ? Opcodes.H_INVOKEINTERFACE : Opcodes.H_INVOKEVIRTUAL;
                 lambdaDescriptor = implDesc;
             }
-            implHandle = new Handle(handleTag, ownerInternal, targetMethod.getName(), implDesc, isInterface);
+            implHandle = new Handle(handleTag, ownerInternal, targetSym.name(), implDesc, isInterface);
         }
 
         StringBuilder indyDesc = new StringBuilder("(");
         MethodVisitor mv = ctx.mv();
-        boolean bindReceiver = !isStaticTarget && !isUnboundInstanceRef && targetCtor == null && !fallbackIsCtor && !refTargetIsType;
+        boolean bindReceiver = !isStaticTarget && !isUnboundInstanceRef && !targetIsCtor && !fallbackIsCtor && !refTargetIsType;
         if (bindReceiver) {
             exprGen.generate(ref.target());
             ResolvedType recvType = ctx.typeInferrer().infer(ref.target());
@@ -310,15 +252,6 @@ public final class LambdaEmitter {
         mv.visitInvokeDynamicInsn(samName, indyDesc.toString(), bsmHandle, samType, implHandle, instantiatedType);
     }
 
-    /**
-     * Emits bytecode for a lambda expression: resolves the SAM target,
-     * analyses captures, writes a synthetic {@code lambda$<enclosing>$N}
-     * method body carrying the lambda's logic, and issues the enclosing
-     * {@code invokedynamic} that builds the functional-interface instance.
-     *
-     * @param lambda     lambda expression
-     * @param targetType functional-interface type the lambda flows into
-     */
     public void emitLambda(@NotNull LambdaExpression lambda, @Nullable ResolvedType targetType) {
         MethodContext ctx = exprGen.ctx();
         MethodVisitor mv = ctx.mv();
@@ -329,27 +262,23 @@ public final class LambdaEmitter {
             throw new CodeGenException("Cannot determine target functional interface for lambda", lambda.line());
 
         String interfaceInternal = targetType.internalName();
-        Class<?> ifaceClass = ctx.methodResolver().classpathManager().loadClass(interfaceInternal);
-        if (ifaceClass == null)
+        TypeSymbol ifaceSym = registry().lookup(interfaceInternal);
+        if (ifaceSym == null)
             throw new CodeGenException("Cannot load functional interface: " + interfaceInternal, lambda.line());
 
-        Method samMethod = null;
-        for (Method m : ctx.methodResolver().classpathManager().cachedMethods(ifaceClass)) {
-            if (!Modifier.isAbstract(m.getModifiers())) continue;
-            if (isOverrideOfObjectMethod(m)) continue;
-            samMethod = m;
-            break;
-        }
-        if (samMethod == null)
+        MethodSymbol samSym = findSam(ifaceSym);
+        if (samSym == null)
             throw new CodeGenException("No abstract method found in: " + interfaceInternal, lambda.line());
 
-        String samName = samMethod.getName();
-        String samDescriptor = Type.getMethodDescriptor(samMethod);
-        Class<?>[] samParamTypes = samMethod.getParameterTypes();
-        Class<?> samReturnType = samMethod.getReturnType();
+        String samName = samSym.name();
+        String samDescriptor = samSym.descriptor();
+        List<TypeRef> samParamRefs = samSym.parameterTypes();
+        TypeRef samReturnRef = samSym.returnType();
 
-        ResolvedType[] resolvedSamParams = resolveSamParams(samMethod, ifaceClass, targetType);
-        Class<?> instantiatedReturn = resolveSamReturn(samMethod, ifaceClass, targetType, samReturnType);
+        Map<String, ResolvedType> tvMap = buildTypeVarMap(ifaceSym, targetType);
+        ResolvedType[] resolvedSamParams = resolveSamParams(samParamRefs, tvMap);
+        ResolvedType instantiatedReturn = resolveSamReturn(samReturnRef, tvMap);
+        boolean returnsVoid = "V".equals(samReturnRef.descriptor());
 
         Set<String> lambdaParamNames = new HashSet<>();
         for (Parameter p : lambda.parameters()) lambdaParamNames.add(p.name());
@@ -364,8 +293,8 @@ public final class LambdaEmitter {
             Parameter param = lambda.parameters().get(i);
             if ("var".equals(param.type().name())) {
                 if (i < resolvedSamParams.length) lambdaParamTypes.add(resolvedSamParams[i]);
-                else if (i < samParamTypes.length)
-                    lambdaParamTypes.add(DescriptorUtils.resolvedTypeFromClass(samParamTypes[i]));
+                else if (i < samParamRefs.size())
+                    lambdaParamTypes.add(refToResolvedType(samParamRefs.get(i)));
                 else lambdaParamTypes.add(ResolvedType.ofObject("java/lang/Object"));
             } else {
                 lambdaParamTypes.add(ctx.typeResolver().resolve(param.type()));
@@ -375,7 +304,7 @@ public final class LambdaEmitter {
         StringBuilder lambdaDescBuilder = new StringBuilder("(");
         for (LocalVariable cap : captures.values()) lambdaDescBuilder.append(cap.type().descriptor());
         for (ResolvedType t : lambdaParamTypes) lambdaDescBuilder.append(t.descriptor());
-        lambdaDescBuilder.append(")").append(Type.getDescriptor(instantiatedReturn));
+        lambdaDescBuilder.append(")").append(returnsVoid ? "V" : instantiatedReturn.descriptor());
         String lambdaDescriptor = lambdaDescBuilder.toString();
 
         String enclosing = ctx.enclosingMethodName() != null ? ctx.enclosingMethodName() : "new";
@@ -420,7 +349,7 @@ public final class LambdaEmitter {
             ExpressionGenerator lambdaExprGen = new ExpressionGenerator(lambdaCtx);
             lambdaExprGen.generate(lambda.expressionBody());
             ResolvedType exprType = lambdaCtx.typeInferrer().infer(lambda.expressionBody());
-            if (instantiatedReturn == void.class) {
+            if (returnsVoid) {
                 if (exprType != null && !exprType.isVoid())
                     lambdaBuffer.visitInsn(exprType.stackSize() == 2 ? Opcodes.POP2 : Opcodes.POP);
                 lambdaBuffer.visitInsn(Opcodes.RETURN);
@@ -428,12 +357,12 @@ public final class LambdaEmitter {
                 if (exprType != null && exprType.isPrimitive() && !instantiatedReturn.isPrimitive()) {
                     PrimitiveConversionEmitter.emitBoxing(lambdaBuffer, exprType);
                 }
-                lambdaBuffer.visitInsn(DescriptorUtils.returnInsn(instantiatedReturn));
+                lambdaBuffer.visitInsn(returnInsnFor(instantiatedReturn));
             }
         } else if (lambda.body() instanceof BlockStatement block) {
             MethodGenerator lambdaGen = new MethodGenerator(lambdaCtx);
             lambdaGen.generateBody(block);
-            if (instantiatedReturn == void.class) lambdaBuffer.visitInsn(Opcodes.RETURN);
+            if (returnsVoid) lambdaBuffer.visitInsn(Opcodes.RETURN);
         }
 
         lambdaBuffer.visitMaxs(0, 0);
@@ -464,134 +393,119 @@ public final class LambdaEmitter {
 
         StringBuilder instantiatedDescBuilder = new StringBuilder("(");
         for (ResolvedType t : lambdaParamTypes) instantiatedDescBuilder.append(t.descriptor());
-        instantiatedDescBuilder.append(")").append(Type.getDescriptor(instantiatedReturn));
+        instantiatedDescBuilder.append(")").append(returnsVoid ? "V" : instantiatedReturn.descriptor());
         Type samType = Type.getMethodType(samDescriptor);
         Type instantiatedType = Type.getMethodType(instantiatedDescBuilder.toString());
         mv.visitInvokeDynamicInsn(samName, indyDescBuilder.toString(), bsmHandle, samType, implHandle, instantiatedType);
     }
 
     /**
-     * True when {@code m}'s name and parameter types match a method on
-     * {@link Object}. Lets SAM discovery skip Object overrides (equals,
-     * hashCode, toString) that every functional interface technically
-     * re-declares but which aren't the "single abstract method".
-     *
-     * @param m candidate abstract method
-     * @return true when a same-signature method exists on {@link Object}
+     * Walks {@code owner} and its supers picking the first abstract instance
+     * method that isn't an Object override (equals/hashCode/etc.). Functional
+     * interfaces have exactly one such method by definition.
      */
-    private boolean isOverrideOfObjectMethod(@NotNull Method m) {
-        try {
-            Object.class.getMethod(m.getName(), m.getParameterTypes());
-            return true;
-        } catch (NoSuchMethodException e) {
-            return false;
+    private @Nullable MethodSymbol findSam(@NotNull TypeSymbol owner) {
+        Set<String> visited = new HashSet<>();
+        return findSamWalk(owner, visited);
+    }
+
+    private @Nullable MethodSymbol findSamWalk(@NotNull TypeSymbol owner, @NotNull Set<String> visited) {
+        if (!visited.add(owner.internalName())) return null;
+        for (MethodSymbol m : owner.methods()) {
+            if (!m.isAbstract()) continue;
+            if (m.isStatic()) continue;
+            if (isOverrideOfObjectMethod(m)) continue;
+            return m;
         }
+        for (TypeSymbol iface : owner.interfaces()) {
+            MethodSymbol found = findSamWalk(iface, visited);
+            if (found != null) return found;
+        }
+        TypeSymbol sup = owner.superclass();
+        if (sup != null) return findSamWalk(sup, visited);
+        return null;
+    }
+
+    private @NotNull List<MethodSymbol> allMethodsIncludingSupers(@NotNull TypeSymbol owner) {
+        List<MethodSymbol> out = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        collectMethods(owner, out, visited);
+        return out;
+    }
+
+    private void collectMethods(@NotNull TypeSymbol owner, @NotNull List<MethodSymbol> out, @NotNull Set<String> visited) {
+        if (!visited.add(owner.internalName())) return;
+        out.addAll(owner.methods());
+        TypeSymbol sup = owner.superclass();
+        if (sup != null) collectMethods(sup, out, visited);
+        for (TypeSymbol iface : owner.interfaces()) collectMethods(iface, out, visited);
     }
 
     /**
-     * Resolves the SAM method's parameter types with the call-site's generic
-     * arguments applied. Each slot falls back to the raw type when the
-     * generic resolution can't produce a {@link ResolvedType}.
-     *
-     * @param samMethod SAM method from the target functional interface
-     * @param samOwner  owning interface class
-     * @param expected  expected target type with any type arguments
-     * @return per-parameter resolved types
+     * True when {@code m}'s name + arity match a method on {@link Object}.
+     * Lets SAM discovery skip equals/hashCode/toString that every functional
+     * interface technically re declares but which aren't the SAM.
      */
-    private @NotNull ResolvedType[] resolveSamParams(@NotNull Method samMethod, @NotNull Class<?> samOwner, @Nullable ResolvedType expected) {
-        java.lang.reflect.Type[] generic = samMethod.getGenericParameterTypes();
-        Class<?>[] raw = samMethod.getParameterTypes();
-        ResolvedType[] out = new ResolvedType[raw.length];
-        Map<String, ResolvedType> tvMap = buildTypeVarMap(samOwner, expected);
-        for (int i = 0; i < raw.length; i++) {
-            ResolvedType resolved = resolveGenericTypeWithMap(generic[i], tvMap);
-            out[i] = resolved != null ? resolved : DescriptorUtils.resolvedTypeFromClass(raw[i]);
+    private boolean isOverrideOfObjectMethod(@NotNull MethodSymbol m) {
+        return OBJECT_METHODS_BY_ARITY.contains(m.name() + ":" + m.parameterTypes().size());
+    }
+
+    private @NotNull ResolvedType[] resolveSamParams(@NotNull List<TypeRef> samParams, @NotNull Map<String, ResolvedType> tvMap) {
+        ResolvedType[] out = new ResolvedType[samParams.size()];
+        for (int i = 0; i < samParams.size(); i++) {
+            ResolvedType resolved = resolveRefWithMap(samParams.get(i), tvMap);
+            out[i] = resolved != null ? resolved : refToResolvedType(samParams.get(i));
         }
         return out;
     }
 
-    /**
-     * Resolves the SAM return type with generic info, mirroring
-     * {@link #resolveSamParams(Method, Class, ResolvedType)}.
-     *
-     * @param samMethod SAM method
-     * @param samOwner  owning functional-interface class
-     * @param expected  expected target type carrying type arguments
-     * @param rawReturn raw return type when generic resolution fails
-     * @return resolved concrete class driving the lambda's return opcode
-     */
-    private @NotNull Class<?> resolveSamReturn(@NotNull Method samMethod, @NotNull Class<?> samOwner, @Nullable ResolvedType expected, @NotNull Class<?> rawReturn) {
-        java.lang.reflect.Type genericReturn = samMethod.getGenericReturnType();
-        Map<String, ResolvedType> tvMap = buildTypeVarMap(samOwner, expected);
-        if (genericReturn instanceof TypeVariable<?> tv) {
-            ResolvedType resolved = tvMap.get(tv.getName());
-            if (resolved != null && resolved.internalName() != null) {
-                Class<?> c = exprGen.ctx().methodResolver().classpathManager().loadClass(resolved.internalName());
-                if (c != null) return c;
-            }
-        }
-        return rawReturn;
+    private @NotNull ResolvedType resolveSamReturn(@NotNull TypeRef samReturn, @NotNull Map<String, ResolvedType> tvMap) {
+        ResolvedType resolved = resolveRefWithMap(samReturn, tvMap);
+        return resolved != null ? resolved : refToResolvedType(samReturn);
     }
 
     /**
-     * Builds a map from the functional-interface's type-parameter names to
-     * the concrete arguments supplied by the call-site, read off
+     * Builds a map from the functional interface's type parameter names to
+     * the concrete arguments supplied by the call site, read off
      * {@link ResolvedType#typeArguments()}.
-     *
-     * @param owner    functional-interface class
-     * @param expected expected target type with type arguments, or null
-     * @return map from type-variable name to resolved argument
      */
-    private @NotNull Map<String, ResolvedType> buildTypeVarMap(@NotNull Class<?> owner, @Nullable ResolvedType expected) {
+    private @NotNull Map<String, ResolvedType> buildTypeVarMap(@NotNull TypeSymbol owner, @Nullable ResolvedType expected) {
         Map<String, ResolvedType> map = new HashMap<>();
         if (expected == null || expected.typeArguments() == null) return map;
-        TypeVariable<?>[] tvs = owner.getTypeParameters();
+        List<TypeParameterSymbol> tvs = owner.typeParameters();
         List<ResolvedType> args = expected.typeArguments();
-        for (int i = 0; i < tvs.length && i < args.size(); i++) {
-            map.put(tvs[i].getName(), args.get(i));
+        for (int i = 0; i < tvs.size() && i < args.size(); i++) {
+            map.put(tvs.get(i).name(), args.get(i));
         }
         return map;
     }
 
-    /**
-     * Resolves a reflective {@link java.lang.reflect.Type} against a
-     * type-variable substitution map. Returns the matching
-     * {@link ResolvedType} or null when no resolution is possible.
-     *
-     * @param t     reflective type to resolve
-     * @param tvMap current substitution map
-     * @return matching resolved type or null
-     */
-    private @Nullable ResolvedType resolveGenericTypeWithMap(@NotNull java.lang.reflect.Type t, @NotNull Map<String, ResolvedType> tvMap) {
-        if (t instanceof Class<?> c) return DescriptorUtils.resolvedTypeFromClass(c);
-        if (t instanceof ParameterizedType pt && pt.getRawType() instanceof Class<?> rc) {
-            return DescriptorUtils.resolvedTypeFromClass(rc);
-        }
-        if (t instanceof TypeVariable<?> tv) {
-            ResolvedType mapped = tvMap.get(tv.getName());
+    private @Nullable ResolvedType resolveRefWithMap(@NotNull TypeRef t, @NotNull Map<String, ResolvedType> tvMap) {
+        if (t.isPrimitive()) return refToResolvedType(t);
+        if (t.isTypeVariable()) {
+            ResolvedType mapped = tvMap.get(t.typeVariableName());
             if (mapped != null) return mapped;
-            java.lang.reflect.Type[] bounds = tv.getBounds();
-            if (bounds.length > 0) return resolveGenericTypeWithMap(bounds[0], tvMap);
             return ResolvedType.ofObject("java/lang/Object");
         }
-        if (t instanceof WildcardType wt) {
-            java.lang.reflect.Type[] upper = wt.getUpperBounds();
-            if (upper.length > 0) return resolveGenericTypeWithMap(upper[0], tvMap);
-        }
-        return null;
+        return refToResolvedType(t);
     }
 
-    /**
-     * True when the body of {@code lambda} references {@code this} (directly,
-     * through a {@code this.foo} access, or through an unqualified call to a
-     * method name that isn't shadowed by a lambda parameter). Drives the
-     * choice between {@code INVOKESTATIC} and {@code INVOKEVIRTUAL} for the
-     * synthetic backing method handle.
-     *
-     * @param lambda     lambda expression
-     * @param paramNames names of the lambda's own parameters
-     * @return true when the lambda body implicitly reads {@code this}
-     */
+    private @NotNull ResolvedType refToResolvedType(@NotNull TypeRef ref) {
+        return ResolvedType.fromDescriptor(ref.descriptor());
+    }
+
+    private int returnInsnFor(@NotNull ResolvedType type) {
+        String desc = type.descriptor();
+        return switch (desc) {
+            case "V" -> Opcodes.RETURN;
+            case "I", "Z", "B", "S", "C" -> Opcodes.IRETURN;
+            case "J" -> Opcodes.LRETURN;
+            case "F" -> Opcodes.FRETURN;
+            case "D" -> Opcodes.DRETURN;
+            default -> Opcodes.ARETURN;
+        };
+    }
+
     private boolean lambdaReferencesThis(@NotNull LambdaExpression lambda, @NotNull Set<String> paramNames) {
         MethodContext ctx = exprGen.ctx();
         List<Expression> exprs = new ArrayList<>();
@@ -609,15 +523,6 @@ public final class LambdaEmitter {
         return false;
     }
 
-    /**
-     * Walks the lambda body and records any outer-scope locals that the
-     * lambda reads, so they can be passed as arguments to the synthetic
-     * backing method.
-     *
-     * @param lambda     lambda expression
-     * @param paramNames names of the lambda's own parameters
-     * @param captures   accumulator populated with captured local variables
-     */
     private void collectLambdaCaptures(@NotNull LambdaExpression lambda, @NotNull Set<String> paramNames, @NotNull LinkedHashMap<String, LocalVariable> captures) {
         MethodContext ctx = exprGen.ctx();
         List<Expression> exprs = new ArrayList<>();
@@ -632,13 +537,7 @@ public final class LambdaEmitter {
         }
     }
 
-    /**
-     * @param params reflective parameter types
-     * @return concatenated JVM descriptors ({@code "II"} for {@code int, int}, etc.)
-     */
-    private @NotNull String descriptorOf(@NotNull Class<?>[] params) {
-        StringBuilder sb = new StringBuilder();
-        for (Class<?> p : params) sb.append(Type.getDescriptor(p));
-        return sb.toString();
+    private @NotNull TypeRegistry registry() {
+        return exprGen.ctx().methodResolver().classpathManager().typeRegistry();
     }
 }
