@@ -1,8 +1,12 @@
 package net.vansencool.vanta.codegen.classes.writer;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.ClassWriter;
+
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Specialised {@link ClassWriter} whose {@code getCommonSuperClass} hook
@@ -36,23 +40,41 @@ public final class VantaClassWriter extends ClassWriter {
         if (cached != null) return cached;
         String result;
         try {
-            Class<?> c1 = cp.loadClass(type1);
-            Class<?> c2 = cp.loadClass(type2);
-            if (c1 == null || c2 == null) result = "java/lang/Object";
-            else if (c1.isAssignableFrom(c2)) result = type1;
-            else if (c2.isAssignableFrom(c1)) result = type2;
-            else if (c1.isInterface() || c2.isInterface()) result = "java/lang/Object";
-            else {
-                Class<?> c = c1;
-                do {
-                    c = c.getSuperclass();
-                } while (c != null && !c.isAssignableFrom(c2));
-                result = c == null ? "java/lang/Object" : c.getName().replace('.', '/');
-            }
+            TypeSymbol s1 = cp.typeRegistry().lookup(type1);
+            TypeSymbol s2 = cp.typeRegistry().lookup(type2);
+            if (s1 == null || s2 == null) result = "java/lang/Object";
+            else if (isAssignableFrom(s1, s2)) result = type1;
+            else if (isAssignableFrom(s2, s1)) result = type2;
+            else if (s1.isInterface() || s2.isInterface()) result = "java/lang/Object";
+            else result = walkUntilAssignable(s1, s2);
         } catch (Throwable t) {
             result = "java/lang/Object";
         }
         cp.commonSuperCache().put(key, result);
         return result;
+    }
+
+    private boolean isAssignableFrom(@NotNull TypeSymbol parent, @NotNull TypeSymbol child) {
+        if (parent.internalName().equals(child.internalName())) return true;
+        if ("java/lang/Object".equals(parent.internalName())) return true;
+        Set<String> visited = new HashSet<>();
+        return walkSupers(child, parent.internalName(), visited);
+    }
+
+    private boolean walkSupers(@NotNull TypeSymbol type, @NotNull String target, @NotNull Set<String> visited) {
+        if (!visited.add(type.internalName())) return false;
+        if (type.internalName().equals(target)) return true;
+        TypeSymbol superclass = type.superclass();
+        if (superclass != null && walkSupers(superclass, target, visited)) return true;
+        for (TypeSymbol iface : type.interfaces()) {
+            if (walkSupers(iface, target, visited)) return true;
+        }
+        return false;
+    }
+
+    private @NotNull String walkUntilAssignable(@NotNull TypeSymbol s1, @NotNull TypeSymbol s2) {
+        TypeSymbol cur = s1.superclass();
+        while (cur != null && !isAssignableFrom(cur, s2)) cur = cur.superclass();
+        return cur == null ? "java/lang/Object" : cur.internalName();
     }
 }

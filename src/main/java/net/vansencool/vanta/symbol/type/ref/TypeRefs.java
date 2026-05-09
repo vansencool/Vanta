@@ -37,4 +37,8 @@ public final class TypeRefs {
     public static @NotNull TypeRef ofTypeVariable(@NotNull String name) {
         return new TypeVariableRef(name);
     }
+
+    public static @NotNull TypeRef ofTypeVariable(@NotNull String name, @NotNull String erasureInternalName) {
+        return new TypeVariableRef(name, erasureInternalName);
+    }
 }

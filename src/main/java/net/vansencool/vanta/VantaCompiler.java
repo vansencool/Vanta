@@ -218,15 +218,10 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                     String outerInternalName = toInternalName(classDecl.name(), cu.packageName());
                     registerInnerClasses(typeResolver, classDecl, outerInternalName);
                     Map<String, byte[]> innerBytecodes = classGenerator.generateInnerClasses(classDecl, cu.packageName());
-                    for (var e : innerBytecodes.entrySet())
-                        classpathManager.registerInMemoryClass(e.getKey(), e.getValue());
                     byte[] bytecode = classGenerator.generate(classDecl, cu.packageName());
-                    classpathManager.registerInMemoryClass(outerInternalName, bytecode);
                     result.put(outerInternalName, bytecode);
                     result.putAll(innerBytecodes);
-                    Map<String, byte[]> anon = classGenerator.getAndClearAnonClassBytecodes();
-                    for (var e : anon.entrySet()) classpathManager.registerInMemoryClass(e.getKey(), e.getValue());
-                    result.putAll(anon);
+                    result.putAll(classGenerator.getAndClearAnonClassBytecodes());
                 }
             }
 

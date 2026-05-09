@@ -22,6 +22,10 @@ public final class ReflectionFieldSymbol implements FieldSymbol {
         this.owner = owner;
     }
 
+    public @NotNull Field reflective() {
+        return field;
+    }
+
     @Override
     public @NotNull String name() {
         return field.getName();

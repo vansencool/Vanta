@@ -37,7 +37,6 @@ public final class ClasspathManager {
     private final @NotNull Map<String, ClassInfo> cache;
     private final @NotNull Map<String, Class<?>> classCache = new ConcurrentHashMap<>();
     private final @NotNull Set<String> missCache = ConcurrentHashMap.newKeySet();
-    private final @NotNull Map<String, byte[]> inMemoryClasses = new ConcurrentHashMap<>();
     private final @NotNull Map<Class<?>, Method[]> methodsCache = new ConcurrentHashMap<>();
     private final @NotNull Map<Class<?>, Map<String, Method[]>> methodsByNameCache = new ConcurrentHashMap<>();
     private final @NotNull Map<Method, String> methodDescriptorCache = new ConcurrentHashMap<>();
@@ -53,7 +52,6 @@ public final class ClasspathManager {
     private volatile @Nullable ExecutorService sharedMethodPool;
     private int sharedMethodPoolSize;
     private @Nullable URLClassLoader userClassLoader;
-    private @Nullable InMemoryClassLoader inMemoryLoaderInstance;
     private volatile @Nullable TypeRegistry typeRegistry;
 
     /**
@@ -271,6 +269,8 @@ public final class ClasspathManager {
      * @return true if the class can be resolved
      */
     public boolean exists(@NotNull String internalName) {
+        if (typeRegistry != null && typeRegistry.hasAstSource(internalName)) return true;
+        if (asmClassInfo(internalName) != null) return true;
         return loadClass(internalName) != null;
     }
 
@@ -420,32 +420,9 @@ public final class ClasspathManager {
                 }
             }
         }
-        if (result == null && inMemoryClasses.containsKey(internalName)) {
-            try {
-                result = Class.forName(className, false, inMemoryLoader());
-            } catch (ClassNotFoundException | LinkageError ignored) {
-            }
-        }
         if (result != null) classCache.put(internalName, result);
-        else if (!inMemoryClasses.containsKey(internalName)) missCache.add(internalName);
+        else missCache.add(internalName);
         return result;
-    }
-
-    /**
-     * Returns a lazily-created classloader that defines classes from the
-     * in-memory bytes registered via {@link #registerInMemoryClass}. Used by
-     * lambda codegen and other reflection-driven paths that require a real
-     * {@link Class} object for a type the compiler has only produced
-     * skeleton bytes for so far.
-     */
-    private @NotNull InMemoryClassLoader inMemoryLoader() {
-        if (inMemoryLoaderInstance == null) {
-            ClassLoader parent = userClassLoader();
-            if (parent == null) parent = Thread.currentThread().getContextClassLoader();
-            if (parent == null) parent = ClassLoader.getSystemClassLoader();
-            inMemoryLoaderInstance = new InMemoryClassLoader(parent);
-        }
-        return inMemoryLoaderInstance;
     }
 
     /**
@@ -518,22 +495,6 @@ public final class ClasspathManager {
         }
     }
 
-    /**
-     * Registers raw class bytes under an internal name so subsequent lookups via
-     * {@link #asmClassInfo(String)} succeed without touching disk. Used by the compiler
-     * to expose just-generated classes to peers in the same compilation batch.
-     */
-    public void registerInMemoryClass(@NotNull String internalName, byte @NotNull [] bytes) {
-        boolean alreadyHad = inMemoryClasses.put(internalName, bytes) != null;
-        asmInfoCache.remove(internalName);
-        asmInfoMiss.remove(internalName);
-        if (!alreadyHad) missCache.remove(internalName);
-        // Keep any previously-defined Class<?> intact so in-flight parallel workers holding a
-        // reference to the in-memory loader continue to see the same Class and do not trigger
-        // LinkageError from redefinition attempts. The ASM-level caches above still update so
-        // subsequent inference uses the real bytes.
-    }
-
     private byte @Nullable [] readClassBytes(@NotNull String internalName) {
         String resourcePath = internalName + ".class";
         for (Path entry : classpathEntries) {
@@ -559,7 +520,7 @@ public final class ClasspathManager {
                 }
             }
         }
-        return inMemoryClasses.get(internalName);
+        return null;
     }
 
     /**
@@ -579,26 +540,6 @@ public final class ClasspathManager {
             return userClassLoader;
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    /**
-     * Classloader that defines classes on demand from the
-     * {@link #inMemoryClasses} map. Delegates anything it has not been
-     * registered for to its parent so already-loaded JDK and user classpath
-     * entries keep their normal resolution.
-     */
-    private final class InMemoryClassLoader extends ClassLoader {
-        InMemoryClassLoader(@NotNull ClassLoader parent) {
-            super(parent);
-        }
-
-        @Override
-        protected @NotNull Class<?> findClass(@NotNull String name) throws ClassNotFoundException {
-            String internal = name.replace('.', '/');
-            byte[] bytes = inMemoryClasses.get(internal);
-            if (bytes == null) throw new ClassNotFoundException(name);
-            return defineClass(name, bytes, 0, bytes.length);
         }
     }
 }

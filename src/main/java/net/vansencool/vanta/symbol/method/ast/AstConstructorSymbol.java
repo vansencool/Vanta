@@ -16,6 +16,7 @@ import org.objectweb.asm.Opcodes;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -28,16 +29,22 @@ public final class AstConstructorSymbol implements MethodSymbol {
     private final @NotNull TypeSymbol owner;
     private final @NotNull TypeResolver typeResolver;
     private final @NotNull Set<String> typeVariables;
+    private final @NotNull Map<String, String> typeVariableErasures;
     private final @Nullable Position sourcePosition;
     private final @Nullable String enclosingOuterInternal;
     private @Nullable List<TypeRef> cachedParameterTypes;
     private @Nullable String cachedDescriptor;
 
     public AstConstructorSymbol(@NotNull MethodDeclaration declaration, @NotNull TypeSymbol owner, @NotNull TypeResolver typeResolver, @NotNull Set<String> typeVariables, @Nullable Position sourcePosition, @Nullable String enclosingOuterInternal) {
+        this(declaration, owner, typeResolver, typeVariables, Map.of(), sourcePosition, enclosingOuterInternal);
+    }
+
+    public AstConstructorSymbol(@NotNull MethodDeclaration declaration, @NotNull TypeSymbol owner, @NotNull TypeResolver typeResolver, @NotNull Set<String> typeVariables, @NotNull Map<String, String> typeVariableErasures, @Nullable Position sourcePosition, @Nullable String enclosingOuterInternal) {
         this.declaration = declaration;
         this.owner = owner;
         this.typeResolver = typeResolver;
         this.typeVariables = typeVariables;
+        this.typeVariableErasures = typeVariableErasures;
         this.sourcePosition = sourcePosition;
         this.enclosingOuterInternal = enclosingOuterInternal;
     }
@@ -92,7 +99,7 @@ public final class AstConstructorSymbol implements MethodSymbol {
         if (cachedParameterTypes != null) return cachedParameterTypes;
         List<TypeRef> out = new ArrayList<>();
         if (enclosingOuterInternal != null) out.add(TypeRefs.ofObject(enclosingOuterInternal));
-        for (Parameter p : declaration.parameters()) out.add(RefFromAst.from(p.type(), typeResolver, typeVariables));
+        for (Parameter p : declaration.parameters()) out.add(RefFromAst.from(p.type(), typeResolver, typeVariables, typeVariableErasures));
         cachedParameterTypes = List.copyOf(out);
         return cachedParameterTypes;
     }

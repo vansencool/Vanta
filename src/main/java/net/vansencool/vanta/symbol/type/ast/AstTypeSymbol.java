@@ -29,8 +29,10 @@ import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class AstTypeSymbol implements TypeSymbol {
@@ -53,6 +55,14 @@ public final class AstTypeSymbol implements TypeSymbol {
         this.registry = registry;
         this.sourceFile = sourceFile;
         this.enclosingNonStaticOuter = enclosingNonStaticOuter;
+    }
+
+    public @NotNull ClassDeclaration declaration() {
+        return declaration;
+    }
+
+    public @NotNull TypeResolver typeResolver() {
+        return typeResolver;
     }
 
     @Override
@@ -113,6 +123,7 @@ public final class AstTypeSymbol implements TypeSymbol {
     public @NotNull List<MethodSymbol> methods() {
         if (cachedMethods != null) return cachedMethods;
         Set<String> typeVariables = ownTypeVariableNames();
+        Map<String, String> typeVariableErasures = ownTypeVariableErasures();
         List<MethodSymbol> out = new ArrayList<>();
         boolean sawConstructor = false;
         for (AstNode m : declaration.members()) {
@@ -120,9 +131,9 @@ public final class AstTypeSymbol implements TypeSymbol {
                 Position pos = sourceFile != null ? Position.of(sourceFile, md.line()) : null;
                 if ("<init>".equals(md.name())) {
                     sawConstructor = true;
-                    out.add(new AstConstructorSymbol(md, this, typeResolver, typeVariables, pos, enclosingNonStaticOuter));
+                    out.add(new AstConstructorSymbol(md, this, typeResolver, typeVariables, typeVariableErasures, pos, enclosingNonStaticOuter));
                 } else {
-                    out.add(new AstMethodSymbol(md, this, typeResolver, typeVariables, pos));
+                    out.add(new AstMethodSymbol(md, this, typeResolver, typeVariables, typeVariableErasures, pos));
                 }
             }
         }
@@ -137,6 +148,7 @@ public final class AstTypeSymbol implements TypeSymbol {
     public @NotNull List<FieldSymbol> fields() {
         if (cachedFields != null) return cachedFields;
         Set<String> typeVariables = ownTypeVariableNames();
+        Map<String, String> typeVariableErasures = ownTypeVariableErasures();
         List<FieldSymbol> out = new ArrayList<>();
         if (isEnum() && declaration.enumConstants() != null) {
             int enumAccess = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
@@ -148,14 +160,14 @@ public final class AstTypeSymbol implements TypeSymbol {
         if (isRecord() && declaration.recordComponents() != null) {
             int recordAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL;
             for (RecordComponent rc : declaration.recordComponents()) {
-                out.add(new SyntheticFieldSymbol(rc.name(), RefFromAst.from(rc.type(), typeResolver, typeVariables), recordAccess, null, this, null));
+                out.add(new SyntheticFieldSymbol(rc.name(), RefFromAst.from(rc.type(), typeResolver, typeVariables, typeVariableErasures), recordAccess, null, this, null));
             }
         }
         for (AstNode m : declaration.members()) {
             if (m instanceof FieldDeclaration fd) {
                 Position pos = sourceFile != null ? Position.of(sourceFile, fd.line()) : null;
                 for (FieldDeclarator declarator : fd.declarators()) {
-                    out.add(new AstFieldSymbol(fd, declarator, this, typeResolver, typeVariables, pos));
+                    out.add(new AstFieldSymbol(fd, declarator, this, typeResolver, typeVariables, typeVariableErasures, pos));
                 }
             }
         }
@@ -204,5 +216,18 @@ public final class AstTypeSymbol implements TypeSymbol {
         Set<String> set = new HashSet<>();
         for (TypeParameter tp : declaration.typeParameters()) set.add(tp.name());
         return set;
+    }
+
+    private @NotNull Map<String, String> ownTypeVariableErasures() {
+        if (declaration.typeParameters() == null || declaration.typeParameters().isEmpty()) return Map.of();
+        Map<String, String> map = new HashMap<>();
+        for (TypeParameter tp : declaration.typeParameters()) {
+            String erasure = "java/lang/Object";
+            if (tp.bounds() != null && !tp.bounds().isEmpty()) {
+                erasure = typeResolver.resolveInternalName(tp.bounds().get(0));
+            }
+            map.put(tp.name(), erasure);
+        }
+        return map;
     }
 }

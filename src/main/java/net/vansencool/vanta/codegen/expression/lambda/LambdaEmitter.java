@@ -20,6 +20,8 @@ import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.expression.ThisExpression;
 import net.vansencool.vanta.parser.ast.statement.BlockStatement;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
+import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.scope.Scope;
@@ -131,19 +133,36 @@ public final class LambdaEmitter {
         ClassWriter cw = ctx.classWriter();
         if (cw == null) throw new CodeGenException("Method references require class level context", ref.line());
         Class<?> ifaceClass = ctx.methodResolver().classpathManager().loadClass(targetType.internalName());
-        if (ifaceClass == null)
-            throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
         Method samMethod = null;
-        for (Method m : ctx.methodResolver().classpathManager().cachedMethods(ifaceClass)) {
-            if (!Modifier.isAbstract(m.getModifiers())) continue;
-            if (isOverrideOfObjectMethod(m)) continue;
-            samMethod = m;
-            break;
+        String samName;
+        String samDescriptor;
+        if (ifaceClass != null) {
+            for (Method m : ctx.methodResolver().classpathManager().cachedMethods(ifaceClass)) {
+                if (!Modifier.isAbstract(m.getModifiers())) continue;
+                if (isOverrideOfObjectMethod(m)) continue;
+                samMethod = m;
+                break;
+            }
+            if (samMethod == null)
+                throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
+            samName = samMethod.getName();
+            samDescriptor = Type.getMethodDescriptor(samMethod);
+        } else {
+            TypeSymbol ifaceSym = ctx.methodResolver().classpathManager().typeRegistry().lookup(targetType.internalName());
+            if (ifaceSym == null)
+                throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
+            MethodSymbol samSym = null;
+            for (MethodSymbol m : ifaceSym.methods()) {
+                if (!m.isAbstract()) continue;
+                if (m.isStatic()) continue;
+                samSym = m;
+                break;
+            }
+            if (samSym == null)
+                throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
+            samName = samSym.name();
+            samDescriptor = samSym.descriptor();
         }
-        if (samMethod == null)
-            throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
-        String samName = samMethod.getName();
-        String samDescriptor = Type.getMethodDescriptor(samMethod);
 
         boolean isCtorRef = "new".equals(ref.methodName());
         String refTargetName = null;

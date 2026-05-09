@@ -60,11 +60,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class ClassGenerator {
 
-    private static final @NotNull String OBJECT_METHODS_DESC =
-            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/TypeDescriptor;Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;";
+    private static final @NotNull String OBJECT_METHODS_DESC = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/TypeDescriptor;Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;";
 
-    private final @NotNull Handle objectMethodsBootstrap =
-            new Handle(Opcodes.H_INVOKESTATIC, "java/lang/runtime/ObjectMethods", "bootstrap", OBJECT_METHODS_DESC, false);
+    private final @NotNull Handle objectMethodsBootstrap = new Handle(Opcodes.H_INVOKESTATIC, "java/lang/runtime/ObjectMethods", "bootstrap", OBJECT_METHODS_DESC, false);
 
     private final @NotNull ClasspathManager classpathManager;
     private final @NotNull TypeResolver typeResolver;
@@ -143,7 +141,6 @@ public final class ClassGenerator {
             byte[] syn = generateSwitchMapClass();
             anonClassBytecodes.add(syn);
             anonClassNames.add(switchMapSyntheticName);
-            classpathManager.registerInMemoryClass(switchMapSyntheticName, syn);
         }
         return bytes;
     }

@@ -2,6 +2,7 @@ package net.vansencool.vanta.symbol.method.ast;
 
 import net.vansencool.vanta.parser.ast.declaration.MethodDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
+import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.parser.ast.type.TypeParameter;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.symbol.Position;
@@ -16,8 +17,10 @@ import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class AstMethodSymbol implements MethodSymbol {
@@ -26,6 +29,7 @@ public final class AstMethodSymbol implements MethodSymbol {
     private final @NotNull TypeSymbol owner;
     private final @NotNull TypeResolver typeResolver;
     private final @NotNull Set<String> outerTypeVariables;
+    private final @NotNull Map<String, String> outerTypeVariableErasures;
     private final @Nullable Position sourcePosition;
     private @Nullable List<TypeParameterSymbol> cachedTypeParameters;
     private @Nullable List<TypeRef> cachedParameterTypes;
@@ -33,10 +37,15 @@ public final class AstMethodSymbol implements MethodSymbol {
     private @Nullable String cachedDescriptor;
 
     public AstMethodSymbol(@NotNull MethodDeclaration declaration, @NotNull TypeSymbol owner, @NotNull TypeResolver typeResolver, @NotNull Set<String> outerTypeVariables, @Nullable Position sourcePosition) {
+        this(declaration, owner, typeResolver, outerTypeVariables, Map.of(), sourcePosition);
+    }
+
+    public AstMethodSymbol(@NotNull MethodDeclaration declaration, @NotNull TypeSymbol owner, @NotNull TypeResolver typeResolver, @NotNull Set<String> outerTypeVariables, @NotNull Map<String, String> outerTypeVariableErasures, @Nullable Position sourcePosition) {
         this.declaration = declaration;
         this.owner = owner;
         this.typeResolver = typeResolver;
         this.outerTypeVariables = outerTypeVariables;
+        this.outerTypeVariableErasures = outerTypeVariableErasures;
         this.sourcePosition = sourcePosition;
     }
 
@@ -90,9 +99,10 @@ public final class AstMethodSymbol implements MethodSymbol {
     public @NotNull List<TypeRef> parameterTypes() {
         if (cachedParameterTypes != null) return cachedParameterTypes;
         Set<String> scope = combinedTypeVariables();
+        Map<String, String> erasures = combinedErasures();
         List<TypeRef> out = new ArrayList<>(declaration.parameters().size());
         for (Parameter p : declaration.parameters()) {
-            out.add(RefFromAst.from(p.type(), typeResolver, scope));
+            out.add(RefFromAst.from(p.type(), typeResolver, scope, erasures));
         }
         cachedParameterTypes = List.copyOf(out);
         return cachedParameterTypes;
@@ -102,7 +112,8 @@ public final class AstMethodSymbol implements MethodSymbol {
     public @NotNull TypeRef returnType() {
         if (cachedReturnType != null) return cachedReturnType;
         Set<String> scope = combinedTypeVariables();
-        cachedReturnType = RefFromAst.from(declaration.returnType(), typeResolver, scope);
+        Map<String, String> erasures = combinedErasures();
+        cachedReturnType = RefFromAst.from(declaration.returnType(), typeResolver, scope, erasures);
         return cachedReturnType;
     }
 
@@ -137,5 +148,24 @@ public final class AstMethodSymbol implements MethodSymbol {
         Set<String> combined = new HashSet<>(outerTypeVariables);
         for (TypeParameter tp : declaration.typeParameters()) combined.add(tp.name());
         return combined;
+    }
+
+    private @NotNull Map<String, String> combinedErasures() {
+        if (declaration.typeParameters() == null || declaration.typeParameters().isEmpty()) return outerTypeVariableErasures;
+        Map<String, String> combined = new HashMap<>(outerTypeVariableErasures);
+        for (TypeParameter tp : declaration.typeParameters()) {
+            combined.put(tp.name(), erasureOf(tp));
+        }
+        return combined;
+    }
+
+    private @NotNull String erasureOf(@NotNull TypeParameter tp) {
+        if (tp.bounds() == null || tp.bounds().isEmpty()) return "java/lang/Object";
+        TypeNode firstBound = tp.bounds().get(0);
+        if (outerTypeVariables.contains(firstBound.name())) {
+            String chained = outerTypeVariableErasures.get(firstBound.name());
+            return chained != null ? chained : "java/lang/Object";
+        }
+        return typeResolver.resolveInternalName(firstBound);
     }
 }

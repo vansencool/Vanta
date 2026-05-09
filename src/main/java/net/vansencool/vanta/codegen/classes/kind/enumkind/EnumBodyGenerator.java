@@ -284,7 +284,6 @@ public final class EnumBodyGenerator {
         subCw.visitEnd();
         owner.anonClassBytecodes().add(subCw.toByteArray());
         owner.anonClassNames().add(subclassInternal);
-        owner.classpathManager().registerInMemoryClass(subclassInternal, subCw.toByteArray());
         return ctorDesc;
     }
 
