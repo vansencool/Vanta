@@ -21,9 +21,12 @@ import net.vansencool.vanta.symbol.field.synth.SyntheticFieldSymbol;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.symbol.method.ast.AstConstructorSymbol;
 import net.vansencool.vanta.symbol.method.ast.AstMethodSymbol;
+import net.vansencool.vanta.symbol.method.synth.SyntheticAccessorMethod;
+import net.vansencool.vanta.symbol.method.synth.SyntheticCanonicalConstructor;
 import net.vansencool.vanta.symbol.method.synth.SyntheticDefaultConstructor;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
+import net.vansencool.vanta.symbol.type.TypeRef;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
 import net.vansencool.vanta.symbol.type.ref.TypeRefs;
 import net.vansencool.vanta.symbol.type.ref.build.RefFromAst;
@@ -129,6 +132,7 @@ public final class AstTypeSymbol implements TypeSymbol {
         Map<String, String> typeVariableErasures = ownTypeVariableErasures();
         List<MethodSymbol> out = new ArrayList<>();
         boolean sawConstructor = false;
+        Set<String> declaredAccessorNames = new HashSet<>();
         for (AstNode m : declaration.members()) {
             if (m instanceof MethodDeclaration md) {
                 Position pos = sourceFile != null ? Position.of(sourceFile, md.line()) : null;
@@ -137,11 +141,40 @@ public final class AstTypeSymbol implements TypeSymbol {
                     out.add(new AstConstructorSymbol(md, this, typeResolver, typeVariables, typeVariableErasures, pos, enclosingNonStaticOuter));
                 } else {
                     out.add(new AstMethodSymbol(md, this, typeResolver, typeVariables, typeVariableErasures, pos));
+                    if (md.parameters().isEmpty()) declaredAccessorNames.add(md.name());
                 }
             }
         }
         if (!sawConstructor && !isInterface() && !isEnum() && !isRecord()) {
             out.add(new SyntheticDefaultConstructor(this, enclosingNonStaticOuter));
+        }
+        if (isRecord() && declaration.recordComponents() != null) {
+            List<TypeRef> componentTypes = new ArrayList<>(declaration.recordComponents().size());
+            for (RecordComponent rc : declaration.recordComponents()) {
+                componentTypes.add(RefFromAst.from(rc.type(), typeResolver, typeVariables, typeVariableErasures));
+            }
+            boolean hasCanonical = false;
+            for (MethodSymbol m : out) {
+                if (!"<init>".equals(m.name())) continue;
+                if (m.parameterTypes().size() != componentTypes.size()) continue;
+                boolean match = true;
+                for (int i = 0; i < componentTypes.size(); i++) {
+                    if (!m.parameterTypes().get(i).descriptor().equals(componentTypes.get(i).descriptor())) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    hasCanonical = true;
+                    break;
+                }
+            }
+            if (!hasCanonical) out.add(new SyntheticCanonicalConstructor(this, componentTypes));
+            for (int i = 0; i < declaration.recordComponents().size(); i++) {
+                RecordComponent rc = declaration.recordComponents().get(i);
+                if (declaredAccessorNames.contains(rc.name())) continue;
+                out.add(new SyntheticAccessorMethod(rc.name(), componentTypes.get(i), this));
+            }
         }
         cachedMethods = List.copyOf(out);
         return cachedMethods;

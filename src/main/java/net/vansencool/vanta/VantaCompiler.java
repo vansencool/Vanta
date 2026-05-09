@@ -385,8 +385,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 if (mw > 1) MethodParallelism.current(mw);
                 try {
                     result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
-                } catch (RuntimeException e) {
-                    firstFailure.compareAndSet(null, e);
+                } catch (Throwable e) {
+                    System.err.println("DBG fail " + path + ": " + e);
+                    if (e instanceof RuntimeException re) firstFailure.compareAndSet(null, re);
                 } finally {
                     if (mw > 1) MethodParallelism.clear();
                 }

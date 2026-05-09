@@ -5,6 +5,7 @@ import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
+import net.vansencool.vanta.parser.ast.declaration.TypeKind;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
 import net.vansencool.vanta.symbol.type.asm.AsmTypeSymbol;
@@ -60,7 +61,9 @@ public final class TypeRegistry {
         cache.remove(internalName);
         for (AstNode m : cd.members()) {
             if (m instanceof ClassDeclaration nested) {
-                String childOuter = (nested.modifiers() & Opcodes.ACC_STATIC) == 0 ? internalName : null;
+                boolean implicitStatic = nested.kind() != TypeKind.CLASS;
+                boolean explicitStatic = (nested.modifiers() & Opcodes.ACC_STATIC) != 0;
+                String childOuter = (implicitStatic || explicitStatic) ? null : internalName;
                 registerRecursive(sourceFile, cu, nested, internalName + "$" + nested.name(), typeResolver, childOuter);
             }
         }

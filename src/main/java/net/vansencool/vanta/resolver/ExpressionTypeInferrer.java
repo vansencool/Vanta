@@ -187,6 +187,7 @@ public final class ExpressionTypeInferrer {
 
     private @NotNull ResolvedType refToResolved(@NotNull TypeRef ref) {
         String desc = ref.descriptor();
+        if ("V".equals(desc)) return ResolvedType.VOID;
         if (ref.isPrimitive()) {
             ResolvedType prim = descriptorToType(desc);
             if (prim != null) return prim;

@@ -42,6 +42,8 @@ import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.util.HashSet;
+
 /**
  * Generates bytecode for all statement types.
  */
@@ -175,7 +177,7 @@ public final class StatementGenerator {
                 } else if (resolvedType.isPrimitive() && initType != null && initType.isPrimitive() && descriptorsDiffer && !literalCoerced) {
                     PrimitiveConversionEmitter.emitPrimitiveWidening(mv, initType.descriptor(), resolvedType.descriptor());
                 } else if (!initIsNull && !resolvedType.isPrimitive() && !resolvedType.isArray() && resolvedType.internalName() != null && !"java/lang/Object".equals(resolvedType.internalName())) {
-                    if (initType != null && !initType.isPrimitive() && initType.internalName() != null && !initType.internalName().equals(resolvedType.internalName()) && !exprGen.isSubtypeOf(initType.internalName(), resolvedType.internalName())) {
+                    if (initType != null && !initType.isPrimitive() && initType.internalName() != null && !initType.internalName().equals(resolvedType.internalName()) && !exprGen.isSubtype(initType.internalName(), resolvedType.internalName(), new HashSet<>())) {
                         mv.visitTypeInsn(Opcodes.CHECKCAST, resolvedType.internalName());
                     }
                 } else if (!initIsNull && resolvedType.isArray() && initType != null && !initType.isPrimitive()
