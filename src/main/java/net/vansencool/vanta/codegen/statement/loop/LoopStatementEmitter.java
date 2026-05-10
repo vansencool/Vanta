@@ -53,11 +53,12 @@ public final class LoopStatementEmitter {
 
         Label conditionLabel = new Label();
         Label endLabel = new Label();
+        boolean infinite = isTrueLiteral(whileStmt.condition());
 
         ctx.labelContext().pushLoop(endLabel, conditionLabel, stmtGen.consumePendingLabel());
 
         mv.visitLabel(conditionLabel);
-        if (!isTrueLiteral(whileStmt.condition())) {
+        if (!infinite) {
             exprGen.conditionEmitter().jumpFalse(whileStmt.condition(), endLabel);
         }
 
@@ -65,7 +66,8 @@ public final class LoopStatementEmitter {
         mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
         ctx.markUnreachable();
 
-        ctx.markReachable();
+        boolean hadBreak = ctx.labelContext().currentLoopHadBreak();
+        if (!infinite || hadBreak) ctx.markReachable();
         mv.visitLabel(endLabel);
         ctx.labelContext().popLoop(null);
     }

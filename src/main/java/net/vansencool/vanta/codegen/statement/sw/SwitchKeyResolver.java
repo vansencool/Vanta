@@ -1,5 +1,6 @@
 package net.vansencool.vanta.codegen.statement.sw;
 
+import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.lexer.token.TokenType;
@@ -24,9 +25,11 @@ import org.objectweb.asm.Opcodes;
 public final class SwitchKeyResolver {
 
     private final @NotNull MethodContext ctx;
+    private final @NotNull ExpressionGenerator exprGen;
 
-    public SwitchKeyResolver(@NotNull MethodContext ctx) {
-        this.ctx = ctx;
+    public SwitchKeyResolver(@NotNull ExpressionGenerator exprGen) {
+        this.exprGen = exprGen;
+        this.ctx = exprGen.ctx();
     }
 
     public boolean isEnum(@NotNull String internalName) {
@@ -73,6 +76,10 @@ public final class SwitchKeyResolver {
                 return v.hashCode();
             }
         }
+        Integer simple = exprGen.constantEvaluator().simpleIntValue(label);
+        if (simple != null) return simple;
+        Integer evaluated = exprGen.constantEvaluator().intValue(label);
+        if (evaluated != null) return evaluated;
         Integer constVal = resolveConstInt(label);
         if (constVal != null) return constVal;
         return 0;

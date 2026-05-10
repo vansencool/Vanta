@@ -37,7 +37,7 @@ public final class SwitchStatementEmitter {
     public SwitchStatementEmitter(@NotNull StatementGenerator stmtGen, @NotNull ExpressionGenerator exprGen) {
         this.stmtGen = stmtGen;
         this.exprGen = exprGen;
-        this.keyResolver = new SwitchKeyResolver(exprGen.ctx());
+        this.keyResolver = new SwitchKeyResolver(exprGen);
     }
 
     /**

@@ -205,6 +205,14 @@ public final class ConstantEvaluator {
                     field = rf.name();
                 }
             }
+            if (owner == null && fa.target() instanceof NameExpression typeName && Character.isUpperCase(typeName.name().charAt(0))) {
+                String typeInternal = ctx.typeResolver().resolveInternalName(new TypeNode(typeName.name(), null, 0, fa.line()));
+                MethodResolver.ResolvedField rf = ctx.methodResolver().resolveField(typeInternal, fa.fieldName());
+                if (rf != null && rf.isStatic()) {
+                    owner = rf.owner();
+                    field = rf.name();
+                }
+            }
         }
         if (owner == null) return null;
         Object v = constantValue(owner, field);

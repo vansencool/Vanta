@@ -353,6 +353,7 @@ public final class StatementGenerator {
      */
     private void generateBreak(@NotNull BreakStatement breakStmt) {
         ctx.mv().visitJumpInsn(Opcodes.GOTO, ctx.labelContext().breakLabel(breakStmt.label()));
+        if (breakStmt.label() == null) ctx.labelContext().markCurrentLoopBreak();
         ctx.markUnreachable();
     }
 
