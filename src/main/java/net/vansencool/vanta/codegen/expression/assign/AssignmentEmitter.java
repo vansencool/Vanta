@@ -353,6 +353,8 @@ public final class AssignmentEmitter {
      */
     private boolean tryEmitIinc(@NotNull String operator, @NotNull LocalVariable local, @NotNull Expression value) {
         if (local.type().stackSize() != 1) return false;
+        String localDesc = local.type().descriptor();
+        if (!"I".equals(localDesc) && !"Z".equals(localDesc)) return false;
         if (!(value instanceof LiteralExpression lit) || lit.literalType() != TokenType.INT_LITERAL) return false;
         if (!("+=".equals(operator) || "-=".equals(operator))) return false;
         try {

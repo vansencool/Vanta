@@ -379,6 +379,13 @@ public final class ExpressionGenerator {
                     ArithmeticOpcodes.emitDeltaPush(mv, localDesc, delta);
                     mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
                     mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
+                } else if ("S".equals(localDesc) || "B".equals(localDesc) || "C".equals(localDesc)) {
+                    int truncOp = "S".equals(localDesc) ? Opcodes.I2S : "B".equals(localDesc) ? Opcodes.I2B : Opcodes.I2C;
+                    mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                    ArithmeticOpcodes.emitDeltaPush(mv, "I", delta);
+                    mv.visitInsn(ArithmeticOpcodes.addOrSub("I", delta));
+                    mv.visitInsn(truncOp);
+                    mv.visitVarInsn(Opcodes.ISTORE, local.index());
                 } else {
                     mv.visitIincInsn(local.index(), delta);
                 }

@@ -162,6 +162,23 @@ public final class UnaryExpressionEmitter {
                         mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
                         mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
                     }
+                } else if ("S".equals(localDesc) || "B".equals(localDesc) || "C".equals(localDesc)) {
+                    int truncOp = "S".equals(localDesc) ? Opcodes.I2S : "B".equals(localDesc) ? Opcodes.I2B : Opcodes.I2C;
+                    if (prefix) {
+                        mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                        ArithmeticOpcodes.emitDeltaPush(mv, "I", delta);
+                        mv.visitInsn(ArithmeticOpcodes.addOrSub("I", delta));
+                        mv.visitInsn(truncOp);
+                        mv.visitInsn(Opcodes.DUP);
+                        mv.visitVarInsn(Opcodes.ISTORE, local.index());
+                    } else {
+                        mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                        mv.visitInsn(Opcodes.DUP);
+                        ArithmeticOpcodes.emitDeltaPush(mv, "I", delta);
+                        mv.visitInsn(ArithmeticOpcodes.addOrSub("I", delta));
+                        mv.visitInsn(truncOp);
+                        mv.visitVarInsn(Opcodes.ISTORE, local.index());
+                    }
                 } else {
                     if (prefix) {
                         mv.visitIincInsn(local.index(), delta);
