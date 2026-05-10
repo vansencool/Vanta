@@ -353,16 +353,15 @@ public final class AssignmentEmitter {
      */
     private boolean tryEmitIinc(@NotNull String operator, @NotNull LocalVariable local, @NotNull Expression value) {
         if (local.type().stackSize() != 1) return false;
-        if (!(value instanceof LiteralExpression lit) || lit.literalType() != TokenType.INT_LITERAL) return false;
+        String localDesc = local.type().descriptor();
+        if (!"I".equals(localDesc) && !"Z".equals(localDesc)) return false;
         if (!("+=".equals(operator) || "-=".equals(operator))) return false;
-        try {
-            int delta = Integer.parseInt(lit.value());
-            if ("-=".equals(operator)) delta = -delta;
-            if (delta < Short.MIN_VALUE || delta > Short.MAX_VALUE) return false;
-            exprGen.ctx().mv().visitIincInsn(local.index(), delta);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+        Integer constValue = exprGen.constantEvaluator().intValue(value);
+        if (constValue == null) return false;
+        int delta = constValue;
+        if ("-=".equals(operator)) delta = -delta;
+        if (delta < Short.MIN_VALUE || delta > Short.MAX_VALUE) return false;
+        exprGen.ctx().mv().visitIincInsn(local.index(), delta);
+        return true;
     }
 }

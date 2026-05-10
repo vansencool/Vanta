@@ -84,8 +84,36 @@ public final class LabelContext {
     }
 
     /**
+     * Marks the innermost loop as having an executed {@code break}. Called by
+     * the break statement emitter when targeting the current loop's break
+     * label.
+     */
+    public void markCurrentLoopBreak() {
+        LoopLabels top = loopStack.peek();
+        if (top != null) top.hadBreak = true;
+    }
+
+    /**
+     * @return true when the innermost loop has had a {@code break} that
+     * targets its end label. Used to decide whether the post-loop end label
+     * is reachable.
+     */
+    public boolean currentLoopHadBreak() {
+        LoopLabels top = loopStack.peek();
+        return top != null && top.hadBreak;
+    }
+
+    /**
      * Internal record of break/continue label pair.
      */
-    private record LoopLabels(@NotNull Label breakLabel, @Nullable Label continueLabel) {
+    private static final class LoopLabels {
+        final @NotNull Label breakLabel;
+        final @Nullable Label continueLabel;
+        boolean hadBreak;
+
+        LoopLabels(@NotNull Label breakLabel, @Nullable Label continueLabel) {
+            this.breakLabel = breakLabel;
+            this.continueLabel = continueLabel;
+        }
     }
 }

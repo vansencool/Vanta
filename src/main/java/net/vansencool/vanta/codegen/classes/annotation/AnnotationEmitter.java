@@ -1,6 +1,5 @@
 package net.vansencool.vanta.codegen.classes.annotation;
 
-import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.parser.ast.declaration.AnnotationNode;
 import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
@@ -12,6 +11,8 @@ import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.expression.UnaryExpression;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.AnnotationVisitor;
@@ -20,7 +21,6 @@ import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Type;
 
-import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
 import java.util.Map;
@@ -35,20 +35,11 @@ import java.util.Map;
 public final class AnnotationEmitter {
 
     private final @NotNull TypeResolver typeResolver;
-    private final @NotNull ClasspathManager classpathManager;
+    private final @NotNull TypeRegistry registry;
 
-    /**
-     * Creates an emitter bound to the surrounding resolver and classpath. The
-     * resolver is used to translate unqualified annotation/type references to
-     * internal names; the classpath reads each annotation's
-     * {@link Retention} policy to choose the right attribute kind.
-     *
-     * @param typeResolver     resolves names to internal descriptors
-     * @param classpathManager provides access to external annotation classes
-     */
-    public AnnotationEmitter(@NotNull TypeResolver typeResolver, @NotNull ClasspathManager classpathManager) {
+    public AnnotationEmitter(@NotNull TypeResolver typeResolver, @NotNull TypeRegistry registry) {
         this.typeResolver = typeResolver;
-        this.classpathManager = classpathManager;
+        this.registry = registry;
     }
 
     /**
@@ -139,9 +130,10 @@ public final class AnnotationEmitter {
             }
         }
         if (value instanceof NameExpression ne) {
-            Class<?> enumCls = classpathManager.loadClass(typeResolver.resolveInternalName(new TypeNode(ne.name(), null, 0, ne.line())));
-            if (enumCls != null && enumCls.isEnum()) {
-                av.visitEnum(name, "L" + enumCls.getName().replace('.', '/') + ";", ne.name());
+            String enumInternal = typeResolver.resolveInternalName(new TypeNode(ne.name(), null, 0, ne.line()));
+            TypeSymbol enumSym = registry.lookup(enumInternal);
+            if (enumSym != null && enumSym.isEnum()) {
+                av.visitEnum(name, "L" + enumSym.internalName() + ";", ne.name());
                 return;
             }
         }
@@ -173,21 +165,24 @@ public final class AnnotationEmitter {
     }
 
     /**
-     * Decides whether an annotation should end up in the runtime-visible or
-     * runtime-invisible attribute table by reading its {@link Retention}
-     * policy. Defaults to runtime-visible when the class can't be loaded.
-     *
-     * @param ann annotation node to inspect
-     * @return true for {@link RetentionPolicy#RUNTIME}, false otherwise
+     * Decides whether an annotation should end up in the runtime visible or
+     * runtime invisible attribute table by reading the annotation type's
+     * retention from the registry. Defaults to runtime visible when the
+     * type cannot be resolved.
      */
     private boolean annotationIsRuntimeVisible(@NotNull AnnotationNode ann) {
         String desc = annotationDescriptor(ann);
         String internal = desc.substring(1, desc.length() - 1);
-        Class<?> c = classpathManager.loadClass(internal);
-        if (c == null) return true;
-        Retention r = c.getAnnotation(Retention.class);
-        if (r == null) return false;
-        return r.value() == RetentionPolicy.RUNTIME;
+        TypeSymbol sym = registry.lookup(internal);
+        if (sym == null) return true;
+        for (var meta : sym.annotations()) {
+            if (!"java/lang/annotation/Retention".equals(meta.internalName())) continue;
+            Object policy = meta.values().get("value");
+            if (policy instanceof RetentionPolicy reflected) return reflected == RetentionPolicy.RUNTIME;
+            if (policy instanceof String name) return "RUNTIME".equals(name);
+            return true;
+        }
+        return false;
     }
 
     /**

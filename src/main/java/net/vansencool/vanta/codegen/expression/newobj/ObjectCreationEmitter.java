@@ -228,7 +228,7 @@ public final class ObjectCreationEmitter {
         ClassGenerator cg = ctx.classGenerator();
         if (cg != null) {
             if (cg.anonClassNames().contains(internalName)) return true;
-            if (cg.nestMemberInternals().contains(internalName)) return true;
+            return cg.nestMemberInternals().contains(internalName);
         }
         return false;
     }

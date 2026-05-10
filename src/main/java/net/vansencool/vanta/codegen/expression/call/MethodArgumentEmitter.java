@@ -14,6 +14,8 @@ import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.MethodVisitor;
@@ -199,12 +201,12 @@ public final class MethodArgumentEmitter {
         MethodContext ctx = exprGen.ctx();
         ResolvedType recv = exprGen.currentReceiverType();
         if (recv == null || recv.typeArguments() == null || recv.internalName() == null) return Map.of();
-        Class<?> cls = ctx.methodResolver().classpathManager().loadClass(recv.internalName());
-        if (cls == null) return Map.of();
-        TypeVariable<?>[] tvs = cls.getTypeParameters();
+        TypeSymbol sym = ctx.methodResolver().classpathManager().typeRegistry().lookup(recv.internalName());
+        if (sym == null) return Map.of();
+        List<TypeParameterSymbol> tps = sym.typeParameters();
         List<ResolvedType> args = recv.typeArguments();
         Map<String, ResolvedType> map = new HashMap<>();
-        for (int i = 0; i < tvs.length && i < args.size(); i++) map.put(tvs[i].getName(), args.get(i));
+        for (int i = 0; i < tps.size() && i < args.size(); i++) map.put(tps.get(i).name(), args.get(i));
         return map;
     }
 

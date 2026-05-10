@@ -1,7 +1,5 @@
 package net.vansencool.vanta.codegen.expression.constant;
 
-import net.vansencool.vanta.classpath.AsmClassInfo;
-import net.vansencool.vanta.classpath.AsmClassInfo.FieldInfo;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.context.MethodContext;
@@ -17,6 +15,11 @@ import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.field.FieldSymbol;
+import net.vansencool.vanta.symbol.field.reflection.ReflectionFieldSymbol;
+import net.vansencool.vanta.symbol.registry.TypeRegistry;
+import net.vansencool.vanta.symbol.type.TypeRef;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.ClassReader;
@@ -26,17 +29,13 @@ import org.objectweb.asm.Opcodes;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Compile-time constant evaluation: folds integer/long literal arithmetic
+ * Compile time constant evaluation: folds integer/long literal arithmetic
  * chains, resolves {@code static final} field references to their
- * {@code ConstantValue} attribute, and exposes enum ordinals. Used so the
- * emitter can replace constant-valued subtrees with a single push instruction
- * rather than emitting a real field access at runtime.
+ * {@code ConstantValue} attribute, and exposes enum ordinals.
  */
 public final class ConstantEvaluator {
 
@@ -44,49 +43,10 @@ public final class ConstantEvaluator {
 
     private final @NotNull ExpressionGenerator exprGen;
 
-    /**
-     * @param exprGen owning expression generator providing context and
-     *                parenthesis-unwrapping
-     */
     public ConstantEvaluator(@NotNull ExpressionGenerator exprGen) {
         this.exprGen = exprGen;
     }
 
-    /**
-     * Walks a class and its superclasses looking for a {@code static final}
-     * field of primitive or {@code String} type. Uses {@link Class#getDeclaredField}
-     * so package-private / private constants on {@code this} class (that
-     * {@link Class#getField} would filter out) still participate in folding.
-     *
-     * @param c    starting class
-     * @param name field name to search for
-     * @return matching field declaration, or null if no eligible field exists
-     * on the inheritance chain
-     */
-    public static @Nullable Field findStaticFinalField(@NotNull Class<?> c, @NotNull String name) {
-        for (Class<?> walk = c; walk != null; walk = walk.getSuperclass()) {
-            try {
-                Field f = walk.getDeclaredField(name);
-                int mods = f.getModifiers();
-                if (!Modifier.isStatic(mods)) continue;
-                if (!Modifier.isFinal(mods)) continue;
-                if (!f.getType().isPrimitive() && !String.class.equals(f.getType())) continue;
-                return f;
-            } catch (NoSuchFieldException ignored) {
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Folds a binary expression whose operands are both integer/long constants
-     * into a single value, mirroring javac's constant-expression evaluation.
-     *
-     * @param binary binary expression node
-     * @return folded value, or {@code null} when either operand is not a
-     * fold-eligible literal or the operator cannot be safely folded
-     * (e.g. integer division by zero)
-     */
     public @Nullable Long foldLong(@NotNull BinaryExpression binary) {
         Long lv = longValue(binary.left());
         Long rv = longValue(binary.right());
@@ -109,12 +69,6 @@ public final class ConstantEvaluator {
         };
     }
 
-    /**
-     * @param expr expression node
-     * @return literal value as {@code Long} when {@code expr} reduces to an
-     * integer/long/char constant (possibly through parentheses, unary
-     * negation, nested folds, or a static-final reference), else null
-     */
     public @Nullable Long longValue(@NotNull Expression expr) {
         Expression cur = exprGen.unwrapParens(expr);
         if (cur instanceof LiteralExpression lit) {
@@ -151,15 +105,9 @@ public final class ConstantEvaluator {
     }
 
     /**
-     * Resolves {@code expr} to the compile-time value of the static-final
-     * field it names, if any. Walks superclasses so non-public inherited
-     * constants still fold.
-     *
-     * @param expr expression node, expected to be a bare name or
-     *             {@code Type.FIELD} access
-     * @return the field's constant value, or null when {@code expr} does not
-     * resolve to a static-final field of primitive or {@code String}
-     * type
+     * Resolves {@code expr} to the compile time value of the static final
+     * field it names, when any. Walks supers via the type registry so non
+     * public inherited constants still fold.
      */
     public @Nullable Object staticFinalValue(@NotNull Expression expr) {
         MethodContext ctx = exprGen.ctx();
@@ -170,7 +118,7 @@ public final class ConstantEvaluator {
             if (ctx.typeInferrer().inferField(tgt.name()) != null) return null;
             if (!Character.isUpperCase(tgt.name().charAt(0))) return null;
             String internal = ctx.typeResolver().resolveInternalName(new TypeNode(tgt.name(), null, 0, expr.line()));
-            if (!ctx.methodResolver().classpathManager().exists(internal)) return null;
+            if (registry().lookup(internal) == null) return null;
             owner = internal;
             fieldName = fa.fieldName();
         } else if (expr instanceof NameExpression ne) {
@@ -187,38 +135,10 @@ public final class ConstantEvaluator {
         } else {
             return null;
         }
-        Class<?> c = ctx.methodResolver().classpathManager().loadClass(owner);
-        if (c != null) {
-            Field f = findStaticFinalField(c, fieldName);
-            if (f != null) {
-                try {
-                    f.setAccessible(true);
-                    return f.get(null);
-                } catch (ReflectiveOperationException | LinkageError ignored) {
-                }
-            }
-        }
-        AsmClassInfo info = ctx.methodResolver().classpathManager().asmClassInfo(owner);
-        if (info != null) {
-            for (FieldInfo fi : info.fields()) {
-                if (!fi.name().equals(fieldName)) continue;
-                int acc = fi.access();
-                if (!Modifier.isStatic(acc) || !Modifier.isFinal(acc)) continue;
-                Object v = fi.constantValue();
-                if (v != null) return v;
-            }
-        }
-        return null;
+        FieldSymbol field = findStaticFinalField(owner, fieldName);
+        return field != null ? field.constantValue() : null;
     }
 
-    /**
-     * Folds a constant int value from shallow expressions (literal, unary
-     * minus, parenthesized) without touching the classpath.
-     *
-     * @param value expression node
-     * @return folded int, or null when {@code value} is not a shape-local int
-     * constant
-     */
     public @Nullable Integer simpleIntValue(@NotNull Expression value) {
         Expression e = value;
         while (e instanceof ParenExpression p) e = p.expression();
@@ -236,11 +156,6 @@ public final class ConstantEvaluator {
         }
     }
 
-    /**
-     * @param expr expression node
-     * @return compile-time int value when {@code expr} is an int literal or a
-     * reference to a static-final int/byte/short/char field, else null
-     */
     public @Nullable Integer intValue(@NotNull Expression expr) {
         MethodContext ctx = exprGen.ctx();
         if (expr instanceof LiteralExpression lit && lit.literalType() == TokenType.INT_LITERAL) {
@@ -290,6 +205,14 @@ public final class ConstantEvaluator {
                     field = rf.name();
                 }
             }
+            if (owner == null && fa.target() instanceof NameExpression typeName && Character.isUpperCase(typeName.name().charAt(0))) {
+                String typeInternal = ctx.typeResolver().resolveInternalName(new TypeNode(typeName.name(), null, 0, fa.line()));
+                MethodResolver.ResolvedField rf = ctx.methodResolver().resolveField(typeInternal, fa.fieldName());
+                if (rf != null && rf.isStatic()) {
+                    owner = rf.owner();
+                    field = rf.name();
+                }
+            }
         }
         if (owner == null) return null;
         Object v = constantValue(owner, field);
@@ -301,13 +224,9 @@ public final class ConstantEvaluator {
     }
 
     /**
-     * Looks up the {@code ConstantValue} attribute for a static-final field
-     * without emitting any instruction.
-     *
-     * @param ownerInternal owner class internal name
-     * @param fieldName     field name
-     * @return the stored constant value, or null if the field is missing,
-     * non-constant, or the owner cannot be loaded
+     * Looks up the {@code ConstantValue} attribute for a static final field
+     * without emitting any instruction. Honors the per batch
+     * {@code nestedClassConstants} cache when present.
      */
     public @Nullable Object constantValue(@NotNull String ownerInternal, @NotNull String fieldName) {
         MethodContext ctx = exprGen.ctx();
@@ -315,47 +234,22 @@ public final class ConstantEvaluator {
             Map<String, Object> consts = ctx.nestedClassConstants().get(ownerInternal);
             if (consts != null && consts.containsKey(fieldName)) return consts.get(fieldName);
         }
-        Class<?> clazz = ctx.methodResolver().classpathManager().loadClass(ownerInternal);
-        if (clazz != null) {
-            try {
-                Field f;
-                try {
-                    f = clazz.getField(fieldName);
-                } catch (NoSuchFieldException nsf) {
-                    f = clazz.getDeclaredField(fieldName);
-                    f.setAccessible(true);
-                }
-                int mods = f.getModifiers();
-                if (!Modifier.isStatic(mods) || !Modifier.isFinal(mods)) return null;
-                Class<?> ftype = f.getType();
-                if (!ftype.isPrimitive() && ftype != String.class) return null;
-                if (!hasConstantValueAttribute(clazz, fieldName)) return null;
-                return f.get(null);
-            } catch (ReflectiveOperationException | LinkageError e) {
-                return null;
-            }
+        FieldSymbol field = findStaticFinalField(ownerInternal, fieldName);
+        if (field == null) return null;
+        TypeRef type = field.type();
+        if (!type.isPrimitive() && !"java/lang/String".equals(type.internalName())) return null;
+        if (field instanceof ReflectionFieldSymbol reflectionField) {
+            Class<?> declaring = reflectionField.reflective().getDeclaringClass();
+            if (!hasConstantValueAttribute(declaring, fieldName)) return null;
         }
-        AsmClassInfo info = ctx.methodResolver().classpathManager().asmClassInfo(ownerInternal);
-        if (info == null) return null;
-        for (FieldInfo fi : info.fields()) {
-            if (!fi.name().equals(fieldName)) continue;
-            if (!fi.isStatic()) return null;
-            if ((fi.access() & Opcodes.ACC_FINAL) == 0) return null;
-            return fi.constantValue();
-        }
-        return null;
+        return field.constantValue();
     }
 
     /**
      * Checks whether a class file actually stores a {@code ConstantValue}
-     * attribute for a field. Needed because {@link Field#get} returns the
-     * runtime value even for non-inlined static-finals, but javac only inlines
+     * attribute for a field. Needed because reflection returns the runtime
+     * value even for non inlined static finals, but javac only inlines
      * those that carry this attribute.
-     *
-     * @param clazz     owner class
-     * @param fieldName field name
-     * @return true when the class file carries a {@code ConstantValue}
-     * attribute for that field
      */
     public boolean hasConstantValueAttribute(@NotNull Class<?> clazz, @NotNull String fieldName) {
         String key = clazz.getName() + "#" + fieldName;
@@ -381,35 +275,39 @@ public final class ConstantEvaluator {
         return result;
     }
 
-    /**
-     * @param enumInternal enum class internal name
-     * @param constantName declared enum constant name
-     * @return ordinal of the matching constant, or null when the class cannot
-     * be resolved as an enum or the constant is not present
-     */
     public @Nullable Integer enumOrdinalFor(@NotNull String enumInternal, @NotNull String constantName) {
-        MethodContext ctx = exprGen.ctx();
-        Class<?> c = ctx.methodResolver().classpathManager().loadClass(enumInternal);
-        if (c != null && c.isEnum()) {
-            try {
-                Object[] consts = c.getEnumConstants();
-                if (consts != null) {
-                    for (int i = 0; i < consts.length; i++) {
-                        if (((Enum<?>) consts[i]).name().equals(constantName)) return i;
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        AsmClassInfo info = ctx.methodResolver().classpathManager().asmClassInfo(enumInternal);
-        if (info != null) {
-            int ord = 0;
-            for (FieldInfo f : info.fields()) {
-                if ((f.access() & Opcodes.ACC_ENUM) == 0) continue;
-                if (f.name().equals(constantName)) return ord;
-                ord++;
-            }
+        TypeSymbol sym = registry().lookup(enumInternal);
+        if (sym == null || !sym.isEnum()) return null;
+        int ord = 0;
+        for (FieldSymbol f : sym.fields()) {
+            if ((f.access() & Opcodes.ACC_ENUM) == 0) continue;
+            if (f.name().equals(constantName)) return ord;
+            ord++;
         }
         return null;
+    }
+
+    private @Nullable FieldSymbol findStaticFinalField(@NotNull String ownerInternal, @NotNull String fieldName) {
+        TypeSymbol owner = registry().lookup(ownerInternal);
+        if (owner == null) return null;
+        return findStaticFinalField(owner, fieldName);
+    }
+
+    private @Nullable FieldSymbol findStaticFinalField(@NotNull TypeSymbol owner, @NotNull String fieldName) {
+        for (FieldSymbol f : owner.fields()) {
+            if (!f.name().equals(fieldName)) continue;
+            if (!f.isStatic() || !f.isFinal()) return null;
+            return f;
+        }
+        for (TypeSymbol iface : owner.interfaces()) {
+            FieldSymbol found = findStaticFinalField(iface, fieldName);
+            if (found != null) return found;
+        }
+        TypeSymbol sup = owner.superclass();
+        return sup != null ? findStaticFinalField(sup, fieldName) : null;
+    }
+
+    private @NotNull TypeRegistry registry() {
+        return exprGen.ctx().methodResolver().classpathManager().typeRegistry();
     }
 }

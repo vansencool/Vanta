@@ -51,20 +51,22 @@ import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Generates bytecode for all expression types.
  * Each generate method pushes a value onto the operand stack.
  */
-@SuppressWarnings("DuplicateExpressions")
 public final class ExpressionGenerator {
 
     private static final String STRING_CONCAT_DESC = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;";
@@ -267,14 +269,6 @@ public final class ExpressionGenerator {
         return null;
     }
 
-    public boolean isSubtypeOf(@NotNull String childInternal, @NotNull String parentInternal) {
-        if (childInternal.equals(parentInternal)) return true;
-        Class<?> c = ctx.methodResolver().classpathManager().loadClass(childInternal);
-        Class<?> p = ctx.methodResolver().classpathManager().loadClass(parentInternal);
-        if (c != null && p != null) return p.isAssignableFrom(c);
-        return false;
-    }
-
     public @NotNull MethodContext ctx() {
         return ctx;
     }
@@ -385,6 +379,13 @@ public final class ExpressionGenerator {
                     ArithmeticOpcodes.emitDeltaPush(mv, localDesc, delta);
                     mv.visitInsn(ArithmeticOpcodes.addOrSub(localDesc, delta));
                     mv.visitVarInsn(OpcodeUtils.storeOpcode(local.type()), local.index());
+                } else if ("S".equals(localDesc) || "B".equals(localDesc) || "C".equals(localDesc)) {
+                    int truncOp = "S".equals(localDesc) ? Opcodes.I2S : "B".equals(localDesc) ? Opcodes.I2B : Opcodes.I2C;
+                    mv.visitVarInsn(Opcodes.ILOAD, local.index());
+                    ArithmeticOpcodes.emitDeltaPush(mv, "I", delta);
+                    mv.visitInsn(ArithmeticOpcodes.addOrSub("I", delta));
+                    mv.visitInsn(truncOp);
+                    mv.visitVarInsn(Opcodes.ISTORE, local.index());
                 } else {
                     mv.visitIincInsn(local.index(), delta);
                 }
@@ -617,14 +618,21 @@ public final class ExpressionGenerator {
      */
     public boolean genericRetWidens(@NotNull String rawInternal, @NotNull String inferredInternal) {
         if ("java/lang/Object".equals(rawInternal)) return true;
-        Class<?> raw = ctx.methodResolver().classpathManager().loadClass(rawInternal);
-        Class<?> inf = ctx.methodResolver().classpathManager().loadClass(inferredInternal);
-        if (raw == null || inf == null) return false;
-        try {
-            return raw.isAssignableFrom(inf) && raw != inf;
-        } catch (LinkageError e) {
-            return false;
+        if (rawInternal.equals(inferredInternal)) return false;
+        return isSubtype(inferredInternal, rawInternal, new HashSet<>());
+    }
+
+    public boolean isSubtype(@NotNull String childInternal, @NotNull String parentInternal, @NotNull Set<String> visited) {
+        if (childInternal.equals(parentInternal)) return true;
+        if (!visited.add(childInternal)) return false;
+        TypeSymbol child = ctx.methodResolver().classpathManager().typeRegistry().lookup(childInternal);
+        if (child == null) return false;
+        TypeSymbol sup = child.superclass();
+        if (sup != null && isSubtype(sup.internalName(), parentInternal, visited)) return true;
+        for (TypeSymbol iface : child.interfaces()) {
+            if (isSubtype(iface.internalName(), parentInternal, visited)) return true;
         }
+        return false;
     }
 
     public boolean lastEmittedCheckcast(@NotNull String wrapperInternal) {

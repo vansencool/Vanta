@@ -46,11 +46,12 @@ import net.vansencool.vanta.parser.ast.statement.WhileStatement;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.field.FieldSymbol;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -411,13 +412,14 @@ public final class EnumSwitchScanner {
             if (tgt instanceof NameExpression tn) {
                 ResolvedType tt = typeResolver.resolve(new TypeNode(tn.name(), null, 0, tn.line()));
                 if (tt.internalName() != null) {
-                    Class<?> c = classpathManager.loadClass(tt.internalName());
-                    if (c != null) {
-                        try {
-                            Field f = c.getField(name);
-                            Class<?> ft = f.getType();
-                            if (ft.isEnum()) return ResolvedType.ofObject(ft.getName().replace('.', '/'));
-                        } catch (ReflectiveOperationException | LinkageError ignored) {
+                    TypeSymbol owner = classpathManager.typeRegistry().lookup(tt.internalName());
+                    if (owner != null) {
+                        for (FieldSymbol f : owner.fields()) {
+                            if (!f.name().equals(name)) continue;
+                            String fieldInternal = f.type().internalName();
+                            if (fieldInternal == null) continue;
+                            TypeSymbol fieldType = classpathManager.typeRegistry().lookup(fieldInternal);
+                            if (fieldType != null && fieldType.isEnum()) return ResolvedType.ofObject(fieldInternal);
                         }
                     }
                 }

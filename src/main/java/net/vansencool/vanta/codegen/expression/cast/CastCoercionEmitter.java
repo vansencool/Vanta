@@ -155,14 +155,7 @@ public final class CastCoercionEmitter {
         MethodContext ctx = exprGen.ctx();
         if (targetInternal.equals(sourceType.internalName())) return true;
         if (sourceType.internalName() == null) return false;
-        Class<?> src = ctx.methodResolver().classpathManager().loadClass(sourceType.internalName());
-        Class<?> tgt = ctx.methodResolver().classpathManager().loadClass(targetInternal);
-        if (src == null || tgt == null) return false;
-        try {
-            return tgt.isAssignableFrom(src);
-        } catch (LinkageError e) {
-            return false;
-        }
+        return ctx.methodResolver().isDescriptorAssignableWithClasspath(sourceType.descriptor(), "L" + targetInternal + ";");
     }
 
     /**
