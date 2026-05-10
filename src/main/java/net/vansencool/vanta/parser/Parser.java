@@ -7,6 +7,8 @@ import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.AstNode;
+import net.vansencool.vanta.parser.ast.comment.Comment;
+import net.vansencool.vanta.parser.ast.comment.CommentTable;
 import net.vansencool.vanta.parser.ast.declaration.AnnotationNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
@@ -69,6 +71,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,21 +87,27 @@ public final class Parser {
 
     private final @NotNull String source;
     private final @Nullable String sourceFile;
+    private final @NotNull List<Comment> sourceComments;
     private @NotNull Token @NotNull [] tokens;
     private int tokenCount;
     private int pos;
     private int speculativeDepth;
 
     public Parser(@NotNull List<Token> tokens) {
-        this(tokens, "", null);
+        this(tokens, "", null, List.of());
     }
 
     public Parser(@NotNull List<Token> tokens, @NotNull String source, @Nullable String sourceFile) {
+        this(tokens, source, sourceFile, List.of());
+    }
+
+    public Parser(@NotNull List<Token> tokens, @NotNull String source, @Nullable String sourceFile, @NotNull List<Comment> comments) {
         this.tokens = tokens.toArray(new Token[0]);
         this.tokenCount = this.tokens.length;
         this.pos = 0;
         this.source = source;
         this.sourceFile = sourceFile;
+        this.sourceComments = comments;
     }
 
     private static @NotNull String tokenDisplay(@NotNull TokenType type) {
@@ -141,7 +151,55 @@ public final class Parser {
         while (!check(EOF)) {
             typeDecls.add(parseTypeDeclaration());
         }
-        return new CompilationUnit(packageName, imports, typeDecls, startLine);
+        CommentTable commentTable = buildCommentTable(typeDecls);
+        return new CompilationUnit(packageName, imports, typeDecls, commentTable, startLine);
+    }
+
+    /**
+     * Pairs each lexer captured comment with the first AST node whose start
+     * line follows the comment's end line. Comments that appear after the
+     * last node are dropped.
+     */
+    private @NotNull CommentTable buildCommentTable(@NotNull List<AstNode> typeDecls) {
+        CommentTable table = new CommentTable(sourceComments);
+        if (sourceComments.isEmpty()) return table;
+        List<AstNode> ordered = new ArrayList<>(typeDecls.size());
+        collectAllNodes(typeDecls, ordered);
+        ordered.sort(Comparator.comparingInt(AstNode::line));
+        Map<AstNode, List<Comment>> buckets = new IdentityHashMap<>();
+        for (Comment comment : sourceComments) {
+            AstNode target = null;
+            for (AstNode node : ordered) {
+                if (node.line() > comment.endLine()) {
+                    target = node;
+                    break;
+                }
+            }
+            if (target == null) continue;
+            buckets.computeIfAbsent(target, k -> new ArrayList<>()).add(comment);
+        }
+        for (Map.Entry<AstNode, List<Comment>> entry : buckets.entrySet()) {
+            table.attachLeading(entry.getKey(), entry.getValue());
+        }
+        return table;
+    }
+
+    /**
+     * Recursively flattens {@code roots} and their nested class members so
+     * the comment attacher can pick from every declaration in the file.
+     */
+    private void collectAllNodes(@NotNull List<AstNode> roots, @NotNull List<AstNode> out) {
+        for (AstNode node : roots) {
+            out.add(node);
+            if (node instanceof ClassDeclaration cd) {
+                out.addAll(cd.members());
+                List<AstNode> nested = new ArrayList<>();
+                for (AstNode m : cd.members()) {
+                    if (m instanceof ClassDeclaration) nested.add(m);
+                }
+                if (!nested.isEmpty()) collectAllNodes(nested, out);
+            }
+        }
     }
 
     /**

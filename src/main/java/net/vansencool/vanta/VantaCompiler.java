@@ -132,8 +132,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * Lexes and parses a single source file into a {@link CompilationUnit}.
      */
     public @NotNull CompilationUnit parse(@NotNull String source, @Nullable String sourceFile) {
-        List<Token> tokens = new Lexer(source, sourceFile).tokenize();
-        return new Parser(tokens, source, sourceFile).parse();
+        Lexer lexer = new Lexer(source, sourceFile);
+        List<Token> tokens = lexer.tokenize();
+        return new Parser(tokens, source, sourceFile, lexer.comments()).parse();
     }
 
     /**

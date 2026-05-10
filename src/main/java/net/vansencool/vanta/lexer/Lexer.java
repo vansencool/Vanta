@@ -6,10 +6,12 @@ import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.lexer.token.TokenType;
+import net.vansencool.vanta.parser.ast.comment.Comment;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -20,6 +22,7 @@ public final class Lexer {
     private final char @NotNull [] source;
     private final @Nullable String sourceFile;
     private final int length;
+    private final @NotNull List<Comment> comments = new ArrayList<>();
     private int pos;
     private int line;
     private int column;
@@ -63,6 +66,14 @@ public final class Lexer {
         }
         tokens.add(new Token(TokenType.EOF, "", line, column));
         return tokens;
+    }
+
+    /**
+     * @return all comments collected during {@link #tokenize()}, in source
+     * order. Empty until {@code tokenize} runs.
+     */
+    public @NotNull List<Comment> comments() {
+        return Collections.unmodifiableList(comments);
     }
 
     /**
@@ -123,11 +134,14 @@ public final class Lexer {
      * Skips a single line comment starting with //.
      */
     private void skipLineComment() {
+        int startLine = line;
+        int textStart = pos + 2;
         pos += 2;
         column += 2;
         while (pos < length && source[pos] != '\n') {
             advance();
         }
+        comments.add(new Comment(Comment.Kind.LINE, new String(source, textStart, pos - textStart), startLine, startLine));
     }
 
     /**
@@ -136,12 +150,16 @@ public final class Lexer {
     private void skipBlockComment() {
         int startLine = line;
         int startCol = column;
+        boolean isDoc = pos + 2 < length && source[pos + 2] == '*' && (pos + 3 >= length || source[pos + 3] != '/');
+        int textStart = pos + 2;
         pos += 2;
         column += 2;
         while (pos < length) {
             if (source[pos] == '*' && pos + 1 < length && source[pos + 1] == '/') {
+                String text = new String(source, textStart, pos - textStart);
                 pos += 2;
                 column += 2;
+                comments.add(new Comment(isDoc ? Comment.Kind.DOC : Comment.Kind.BLOCK, text, startLine, line));
                 return;
             }
             if (source[pos] == '\n') {
