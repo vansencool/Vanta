@@ -9,7 +9,9 @@ import net.vansencool.vanta.codegen.MethodGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.type.UnresolvedTypeDiagnostic;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclarator;
@@ -98,7 +100,7 @@ public final class ObjectCreationEmitter {
         MethodVisitor mv = ctx.mv();
         String declaredType = ctx.typeResolver().resolveInternalName(newExpr.type());
         if (newExpr.anonymousClassBody() == null && !isResolvableType(declaredType)) {
-            throw new CodeGenException("Cannot resolve type '" + declaredType.replace('/', '.') + "' in new expression", newExpr.line());
+            throw new CompilationException(UnresolvedTypeDiagnostic.build(ctx, newExpr, newExpr.type(), "new expression"));
         }
         boolean targetIsInterface = isTargetInterface(declaredType);
         String superInternal = targetIsInterface ? "java/lang/Object" : declaredType;

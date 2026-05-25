@@ -18,6 +18,7 @@ import net.vansencool.vanta.codegen.classes.scan.AnonCounter;
 import net.vansencool.vanta.codegen.classes.scan.AssertScanner;
 import net.vansencool.vanta.codegen.classes.writer.VantaClassWriter;
 import net.vansencool.vanta.parser.ast.AstNode;
+import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.EnumConstant;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
@@ -67,6 +68,8 @@ public final class ClassGenerator {
     private final @NotNull ClasspathManager classpathManager;
     private final @NotNull TypeResolver typeResolver;
     private final @Nullable String sourceFile;
+    private final @NotNull String source;
+    private final @NotNull SpanTable spanTable;
 
     private final @NotNull AtomicInteger lambdaCounter = new AtomicInteger(0);
     private final @NotNull List<byte[]> anonClassBytecodes = new ArrayList<>();
@@ -103,11 +106,15 @@ public final class ClassGenerator {
      * @param classpathManager classpath used to load external classes and cache common-super queries
      * @param typeResolver     resolver used by every emitter for source-to-internal-name conversion
      * @param sourceFile       source file name written into the {@code SourceFile} attribute, or null
+     * @param source           full source text of the compilation unit
+     * @param spanTable        per AST node source spans recorded by the parser
      */
-    public ClassGenerator(@NotNull ClasspathManager classpathManager, @NotNull TypeResolver typeResolver, @Nullable String sourceFile) {
+    public ClassGenerator(@NotNull ClasspathManager classpathManager, @NotNull TypeResolver typeResolver, @Nullable String sourceFile, @NotNull String source, @NotNull SpanTable spanTable) {
         this.classpathManager = classpathManager;
         this.typeResolver = typeResolver;
         this.sourceFile = sourceFile;
+        this.source = source;
+        this.spanTable = spanTable;
         this.constantFolder = new ConstantFolder(typeResolver, classpathManager);
         this.annotationEmitter = new AnnotationEmitter(typeResolver, classpathManager.typeRegistry());
         this.bridgeMethodEmitter = new BridgeMethodEmitter(typeResolver, classpathManager.typeRegistry());
@@ -270,6 +277,20 @@ public final class ClassGenerator {
      */
     public @Nullable String sourceFile() {
         return sourceFile;
+    }
+
+    /**
+     * @return full source text of the compilation unit
+     */
+    public @NotNull String source() {
+        return source;
+    }
+
+    /**
+     * @return per AST node source spans recorded by the parser
+     */
+    public @NotNull SpanTable spanTable() {
+        return spanTable;
     }
 
     /**

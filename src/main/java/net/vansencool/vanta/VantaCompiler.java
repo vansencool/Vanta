@@ -209,7 +209,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile) {
         try {
             TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
-            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile);
+            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile, source, cu.spanTable());
 
             Map<String, byte[]> result = new HashMap<>();
 

@@ -9,6 +9,8 @@ import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.comment.Comment;
 import net.vansencool.vanta.parser.ast.comment.CommentTable;
+import net.vansencool.vanta.parser.ast.span.Span;
+import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.declaration.AnnotationNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
@@ -88,6 +90,7 @@ public final class Parser {
     private final @NotNull String source;
     private final @Nullable String sourceFile;
     private final @NotNull List<Comment> sourceComments;
+    private final @NotNull SpanTable spanTable = new SpanTable();
     private @NotNull Token @NotNull [] tokens;
     private int tokenCount;
     private int pos;
@@ -152,7 +155,7 @@ public final class Parser {
             typeDecls.add(parseTypeDeclaration());
         }
         CommentTable commentTable = buildCommentTable(typeDecls);
-        return new CompilationUnit(packageName, imports, typeDecls, commentTable, startLine);
+        return new CompilationUnit(packageName, imports, typeDecls, commentTable, spanTable, startLine);
     }
 
     /**
@@ -860,7 +863,7 @@ public final class Parser {
      * @return the type node
      */
     private @NotNull TypeNode parseType() {
-        int line = current().line();
+        Token start = current();
         parseAnnotations();
         String name = parseTypeName();
         List<TypeNode> typeArgs = null;
@@ -878,7 +881,12 @@ public final class Parser {
                 break;
             }
         }
-        return new TypeNode(name, typeArgs, dims, line);
+        TypeNode node = new TypeNode(name, typeArgs, dims, start.line());
+        Token end = previous();
+        int endLine = end.line();
+        int endColumn = end.value().isEmpty() ? end.column() : end.column() + end.value().length() - 1;
+        spanTable.record(node, new Span(start.line(), start.column(), endLine, endColumn));
+        return node;
     }
 
     /**
@@ -1358,23 +1366,23 @@ public final class Parser {
     }
 
     private @NotNull Expression parseCaseLabel() {
-        int line = current().line();
+        Token start = current();
         TokenType type = current().type();
         if (type == IDENTIFIER || type == VAR || type == YIELD || type == RECORD) {
             String name = current().value();
             advance();
             if (check(DOT)) {
                 advance();
-                Expression target = new NameExpression(name, line);
+                Expression target = span(start, new NameExpression(name, start.line()));
                 String fieldName = expectIdentifier();
-                return new FieldAccessExpression(target, fieldName, line);
+                return span(start, new FieldAccessExpression(target, fieldName, start.line()));
             }
-            return new NameExpression(name, line);
+            return span(start, new NameExpression(name, start.line()));
         }
         if (type != NULL && type != TRUE && type != FALSE && !type.isPrimitive() && type != INT_LITERAL && type != LONG_LITERAL && type != FLOAT_LITERAL && type != DOUBLE_LITERAL && type != CHAR_LITERAL && type != STRING_LITERAL && type != TEXT_BLOCK && type != LEFT_PAREN && type != NEW && type != THIS && type != SUPER && type != SWITCH && type != MINUS) {
             String name = current().value();
             advance();
-            return new NameExpression(name, line);
+            return span(start, new NameExpression(name, start.line()));
         }
         return parseExpression();
     }
@@ -1979,13 +1987,15 @@ public final class Parser {
                     advance();
                     expr = new FieldAccessExpression(expr, "super", line);
                 } else {
-                    int line = current().line();
+                    Token nameTok = current();
                     String name = expectIdentifier();
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
-                        expr = new MethodCallExpression(expr, name, args, null, line);
+                        Token receiverStart = startTokenOf(expr, nameTok);
+                        expr = span(receiverStart, new MethodCallExpression(expr, name, args, null, nameTok.line()));
                     } else {
-                        expr = new FieldAccessExpression(expr, name, line);
+                        Token receiverStart = startTokenOf(expr, nameTok);
+                        expr = span(receiverStart, new FieldAccessExpression(expr, name, nameTok.line()));
                     }
                 }
             } else if (check(LEFT_BRACKET)) {
@@ -2009,7 +2019,8 @@ public final class Parser {
                 } else {
                     name = expectIdentifier();
                 }
-                expr = new MethodReferenceExpression(expr, name, line);
+                Token mrStart = startTokenOf(expr, current());
+                expr = span(mrStart, new MethodReferenceExpression(expr, name, line));
             } else {
                 break;
             }
@@ -2039,7 +2050,8 @@ public final class Parser {
      * @return the expression
      */
     private @NotNull Expression parsePrimary() {
-        int line = current().line();
+        Token start = current();
+        int line = start.line();
 
         switch (current().type()) {
             case INT_LITERAL:
@@ -2051,64 +2063,64 @@ public final class Parser {
             case TEXT_BLOCK, TRUE, FALSE: {
                 Token tok = current();
                 advance();
-                return new LiteralExpression(tok.type(), tok.value(), line);
+                return span(start, new LiteralExpression(tok.type(), tok.value(), line));
             }
             case NULL: {
                 advance();
-                return new LiteralExpression(NULL, "null", line);
+                return span(start, new LiteralExpression(NULL, "null", line));
             }
             case THIS: {
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, "this", args, null, line);
+                    return span(start, new MethodCallExpression(null, "this", args, null, line));
                 }
-                return new ThisExpression(line);
+                return span(start, new ThisExpression(line));
             }
             case SUPER: {
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, "super", args, null, line);
+                    return span(start, new MethodCallExpression(null, "super", args, null, line));
                 }
                 if (check(DOT)) {
                     advance();
                     String name = expectIdentifier();
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
-                        return new MethodCallExpression(new SuperExpression(line), name, args, null, line);
+                        return span(start, new MethodCallExpression(span(start, new SuperExpression(line)), name, args, null, line));
                     }
-                    return new FieldAccessExpression(new SuperExpression(line), name, line);
+                    return span(start, new FieldAccessExpression(span(start, new SuperExpression(line)), name, line));
                 }
-                return new SuperExpression(line);
+                return span(start, new SuperExpression(line));
             }
             case NEW: {
                 advance();
-                return parseNewExpression(line);
+                return span(start, parseNewExpression(line));
             }
             case LEFT_PAREN: {
                 if (isLambda()) {
-                    return parseLambdaExpression(line);
+                    return span(start, parseLambdaExpression(line));
                 }
                 advance();
                 Expression expr = parseExpression();
                 expect(RIGHT_PAREN);
-                return new ParenExpression(expr, line);
+                return span(start, new ParenExpression(expr, line));
             }
             case SWITCH: {
-                return parseSwitchExpr();
+                return span(start, parseSwitchExpr());
             }
             case IDENTIFIER, VAR, YIELD, RECORD: {
                 String name = current().value();
                 if (peek().type() == ARROW) {
-                    return parseSingleParamLambda(name, line);
+                    return span(start, parseSingleParamLambda(name, line));
                 }
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, name, args, null, line);
+                    return span(start, new MethodCallExpression(null, name, args, null, line));
                 }
-                return new NameExpression(name, line);
+                return span(start, new NameExpression(name, line));
             }
             default:
                 if (current().type().isPrimitive() || current().type() == VOID) {
@@ -2369,6 +2381,58 @@ public final class Parser {
      */
     private @NotNull Token current() {
         return tokens[pos];
+    }
+
+    /**
+     * @return last consumed token
+     */
+    private @NotNull Token previous() {
+        return tokens[Math.max(0, pos - 1)];
+    }
+
+    /**
+     * Records a {@link Span} for {@code node} stretching from {@code start} to
+     * the last consumed token.
+     */
+    private <T extends AstNode> @NotNull T span(@NotNull Token start, @NotNull T node) {
+        return span(start.line(), start.column(), node);
+    }
+
+    /**
+     * Records a {@link Span} for {@code node} starting at the given line and
+     * column and ending at the last consumed token.
+     */
+    private <T extends AstNode> @NotNull T span(int startLine, int startColumn, @NotNull T node) {
+        Token end = previous();
+        int endLine = end.line();
+        int endColumn = end.column();
+        String value = end.value();
+        if (!value.isEmpty()) {
+            int lastNewline = value.lastIndexOf('\n');
+            if (lastNewline < 0) {
+                endColumn = end.column() + value.length() - 1;
+            } else {
+                int extraLines = 0;
+                for (int i = 0; i < value.length(); i++) if (value.charAt(i) == '\n') extraLines++;
+                endLine = end.line() + extraLines;
+                endColumn = value.length() - lastNewline - 1;
+                if (endColumn < 1) endColumn = 1;
+            }
+        }
+        spanTable.record(node, new Span(startLine, startColumn, endLine, endColumn));
+        return node;
+    }
+
+    /**
+     * @param receiver expression already given a span when it was constructed
+     * @param fallback token to fall back on when {@code receiver} has no span
+     * @return token-equivalent start position (line plus column) usable with
+     * {@link #span(int, int, AstNode)}
+     */
+    private @NotNull Token startTokenOf(@NotNull AstNode receiver, @NotNull Token fallback) {
+        Span existing = spanTable.span(receiver);
+        if (existing == null) return fallback;
+        return new Token(fallback.type(), fallback.value(), existing.startLine(), existing.startColumn());
     }
 
     /**

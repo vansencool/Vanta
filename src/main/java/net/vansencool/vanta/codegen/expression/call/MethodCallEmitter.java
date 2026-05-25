@@ -3,7 +3,10 @@ package net.vansencool.vanta.codegen.expression.call;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.method.MethodResolutionDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.method.SelfMethodDiagnostic;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
@@ -164,9 +167,7 @@ public final class MethodCallEmitter {
                 mv.visitTypeInsn(Opcodes.CHECKCAST, arrayDesc);
                 return true;
             }
-            String targetDesc = targetTypeFb == null ? "<unknown>" : targetTypeFb.descriptor();
-            throw new CodeGenException("Cannot resolve method " + call.methodName() + "/" + call.arguments().size()
-                    + " on receiver of type " + targetDesc + " (in " + ctx.classInternalName() + ")", call.line());
+            throw new CompilationException(MethodResolutionDiagnostic.build(ctx, call, targetTypeFb));
         }
 
         SelfMethodInfo selfInfo = exprGen.methodResolutionHelper().resolveSelfMethod(call);
@@ -219,7 +220,6 @@ public final class MethodCallEmitter {
             mv.visitMethodInsn(selfResolved.opcode(), selfResolved.owner(), selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
             return !selfResolved.descriptor().endsWith(")V");
         }
-        throw new CodeGenException("Cannot resolve self method " + call.methodName() + "/" + call.arguments().size()
-                + " on " + ctx.classInternalName(), call.line());
+        throw new CompilationException(SelfMethodDiagnostic.build(ctx, call));
     }
 }

@@ -7,7 +7,11 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.classes.visitor.RecordingMethodVisitor;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaNoSamDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaTargetDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceDiagnostic;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
 import net.vansencool.vanta.parser.ast.expression.Expression;
@@ -166,8 +170,7 @@ public final class LambdaEmitter {
             } else if (instMatch != null) {
                 targetSym = instMatch;
                 isUnboundInstanceRef = true;
-            } else
-                throw new CodeGenException("No matching method " + ref.methodName() + " in " + refTargetType.internalName(), ref.line());
+            } else throw new CompilationException(MethodReferenceDiagnostic.build(ctx, ref, refTargetSym, samArity));
         } else if (refTargetIsType) {
             fallbackOwnerInternal = refTargetType.internalName();
             fallbackIsStatic = true;
@@ -259,7 +262,7 @@ public final class LambdaEmitter {
         if (cw == null) throw new CodeGenException("Lambda expressions require class level context", lambda.line());
 
         if (targetType == null || targetType.internalName() == null)
-            throw new CodeGenException("Cannot determine target functional interface for lambda", lambda.line());
+            throw new CompilationException(LambdaTargetDiagnostic.build(ctx, lambda));
 
         String interfaceInternal = targetType.internalName();
         TypeSymbol ifaceSym = registry().lookup(interfaceInternal);
@@ -268,7 +271,7 @@ public final class LambdaEmitter {
 
         MethodSymbol samSym = findSam(ifaceSym);
         if (samSym == null)
-            throw new CodeGenException("No abstract method found in: " + interfaceInternal, lambda.line());
+            throw new CompilationException(LambdaNoSamDiagnostic.build(ctx, lambda, ifaceSym));
 
         String samName = samSym.name();
         String samDescriptor = samSym.descriptor();
