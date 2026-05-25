@@ -7,6 +7,9 @@ import org.objectweb.asm.Type;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.module.ModuleReader;
+import java.lang.module.ModuleReference;
+import java.lang.module.ResolvedModule;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -16,8 +19,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -37,6 +42,7 @@ public final class ClasspathManager {
     private final @NotNull Map<String, ClassInfo> cache;
     private final @NotNull Map<String, Class<?>> classCache = new ConcurrentHashMap<>();
     private final @NotNull Set<String> missCache = ConcurrentHashMap.newKeySet();
+    private @Nullable Set<String> allClassNames;
     private final @NotNull Map<Class<?>, Method[]> methodsCache = new ConcurrentHashMap<>();
     private final @NotNull Map<Class<?>, Map<String, Method[]>> methodsByNameCache = new ConcurrentHashMap<>();
     private final @NotNull Map<Method, String> methodDescriptorCache = new ConcurrentHashMap<>();
@@ -214,6 +220,60 @@ public final class ClasspathManager {
      */
     public @NotNull List<Path> entries() {
         return List.copyOf(classpathEntries);
+    }
+
+    /**
+     * @return every classpath internal name (slash separated) discoverable from
+     * loaded JAR / directory entries and from the JDK module image. Lazily
+     * populated, then cached.
+     */
+    public @NotNull Set<String> enumerateClasses() {
+        if (allClassNames != null) return allClassNames;
+        Set<String> out = new HashSet<>();
+        for (Path entry : classpathEntries) {
+            File f = entry.toFile();
+            if (!f.exists()) continue;
+            if (f.isDirectory()) {
+                try {
+                    Files.walk(entry).filter(p -> p.toString().endsWith(".class")).forEach(p -> {
+                        String rel = entry.relativize(p).toString();
+                        out.add(rel.substring(0, rel.length() - ".class".length()).replace(File.separatorChar, '/'));
+                    });
+                } catch (IOException ignored) {
+                }
+            } else if (f.getName().endsWith(".jar") || f.getName().endsWith(".zip")) {
+                try (ZipFile zip = new ZipFile(f)) {
+                    zip.stream().forEach(e -> {
+                        String n = e.getName();
+                        if (n.endsWith(".class") && !n.startsWith("META-INF/")) {
+                            out.add(n.substring(0, n.length() - ".class".length()));
+                        }
+                    });
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        for (Module m : ModuleLayer.boot().modules()) {
+            addModuleClasses(out, m.getName());
+        }
+        allClassNames = Set.copyOf(out);
+        return allClassNames;
+    }
+
+    /**
+     * Lists every class name in the boot module {@code moduleName} (without
+     * the {@code .class} suffix) and adds the internal names to {@code out}.
+     */
+    private static void addModuleClasses(@NotNull Set<String> out, @NotNull String moduleName) {
+        Optional<ResolvedModule> resolved = ModuleLayer.boot().configuration().findModule(moduleName);
+        if (resolved.isEmpty()) return;
+        ModuleReference ref = resolved.get().reference();
+        try (ModuleReader reader = ref.open()) {
+            reader.list()
+                    .filter(n -> n.endsWith(".class") && !n.equals("module-info.class"))
+                    .forEach(n -> out.add(n.substring(0, n.length() - ".class".length())));
+        } catch (IOException ignored) {
+        }
     }
 
     /**

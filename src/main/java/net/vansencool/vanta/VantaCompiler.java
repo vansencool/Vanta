@@ -2,6 +2,7 @@ package net.vansencool.vanta;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
+import net.vansencool.vanta.codegen.diagnostic.imp.ImportValidator;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.Lexer;
 import net.vansencool.vanta.lexer.token.Token;
@@ -204,6 +205,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      */
     public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile) {
         try {
+            ImportValidator.validate(classpathManager, source, sourceFile, cu);
             TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
             ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile, source, cu.spanTable());
 

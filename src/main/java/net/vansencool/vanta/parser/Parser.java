@@ -223,7 +223,7 @@ public final class Parser {
      * @return the import declaration node
      */
     private @NotNull ImportDeclaration parseImportDeclaration() {
-        int line = current().line();
+        Token start = current();
         expect(IMPORT);
         boolean isStatic = false;
         if (check(STATIC)) {
@@ -239,7 +239,7 @@ public final class Parser {
             isWildcard = true;
         }
         expect(SEMICOLON);
-        return new ImportDeclaration(name, isStatic, isWildcard, line);
+        return span(start, new ImportDeclaration(name, isStatic, isWildcard, start.line()));
     }
 
     /**
