@@ -19,6 +19,7 @@ import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -98,23 +99,58 @@ public final class NonEffectivelyFinalCaptureDiagnostic {
                 if (insertAt >= 0) {
                     String snippet = declLine.substring(insertAt).stripTrailing();
                     String typeHint = snippet.split("\\s+", 2).length > 0 ? snippet.split("\\s+", 2)[0] : "type";
-                    builder.fix(new Fix(
-                            "declare '" + captured.name() + "' final",
-                            "marks the local final so the capture is permitted (insert before the type '" + typeHint + "')",
-                            List.of(Edit.insert(declSpan.startLine(), insertAt, "final ", "insert 'final' before '" + typeHint + "'")),
-                            Applicability.MACHINE_APPLICABLE));
+                    List<AstNode> reassigns = ctx.reassignmentSites(captured.name());
+                    List<AstNode> deletableReassigns = new ArrayList<>();
+                    for (AstNode r : reassigns) {
+                        Span rs = spans.span(r);
+                        if (rs == null) continue;
+                        if (rs.startLine() >= span.startLine() && rs.endLine() <= span.endLine()) continue;
+                        deletableReassigns.add(r);
+                    }
+                    if (reassigns.isEmpty()) {
+                        builder.fix(new Fix(
+                                "declare '" + captured.name() + "' final",
+                                "marks the local final so the capture is permitted (insert before the type '" + typeHint + "')",
+                                List.of(Edit.insert(declSpan.startLine(), insertAt, "final ", "insert 'final' before '" + typeHint + "'")),
+                                Applicability.MACHINE_APPLICABLE));
+                    } else if (!deletableReassigns.isEmpty()) {
+                        List<Edit> edits = new ArrayList<>();
+                        edits.add(Edit.insert(declSpan.startLine(), insertAt, "final ", "insert 'final' before '" + typeHint + "'"));
+                        for (AstNode r : deletableReassigns) {
+                            Span rs = spans.span(r);
+                            if (rs == null) continue;
+                            String rText = SourceLines.lineAt(cg.source(), rs.startLine());
+                            edits.add(Edit.delete(rs.startLine(), 0, rText.length(), "drop this reassignment"));
+                        }
+                        builder.fix(new Fix(
+                                "declare '" + captured.name() + "' final and delete the " + (deletableReassigns.size() == 1 ? "reassignment" : deletableReassigns.size() + " reassignments"),
+                                "JLS forbids a final local from being reassigned, so the offending writes must go too",
+                                edits,
+                                Applicability.MAYBE_INCORRECT));
+                    }
                 }
-                String indent = declLine.substring(0, firstNonSpace);
-                String snapshotName = captured.name() + "Snapshot";
-                String snapshotLine = indent + "final " + TypeCompatibility.display(captured.type()) + " " + snapshotName + " = " + captured.name() + ";";
-                builder.fix(new Fix(
-                        "snapshot '" + captured.name() + "' before the " + construct,
-                        "captures a frozen copy that survives later reassignments",
-                        List.of(
-                                Edit.insertLineBefore(span.startLine(), snapshotLine, "insert snapshot line"),
-                                Edit.replace(span.startLine(), range.startCol(), range.endCol(), substituteName(sourceText, range, captured.name(), snapshotName), "use snapshot inside")
-                        ),
-                        Applicability.MAYBE_INCORRECT));
+                boolean hasInnerReassign = false;
+                for (AstNode r : ctx.reassignmentSites(captured.name())) {
+                    Span rs = spans.span(r);
+                    if (rs == null) continue;
+                    if (rs.startLine() >= span.startLine() && rs.endLine() <= span.endLine()) {
+                        hasInnerReassign = true;
+                        break;
+                    }
+                }
+                if (!hasInnerReassign) {
+                    String indent = declLine.substring(0, firstNonSpace);
+                    String snapshotName = captured.name() + "Snapshot";
+                    String snapshotLine = indent + "final " + TypeCompatibility.display(captured.type()) + " " + snapshotName + " = " + captured.name() + ";";
+                    builder.fix(new Fix(
+                            "snapshot '" + captured.name() + "' before the " + construct,
+                            "captures a frozen copy that survives later reassignments",
+                            List.of(
+                                    Edit.insertLineBefore(span.startLine(), snapshotLine, "insert snapshot line"),
+                                    Edit.replace(span.startLine(), range.startCol(), range.endCol(), substituteName(sourceText, range, captured.name(), snapshotName), "use snapshot inside")
+                            ),
+                            Applicability.MAYBE_INCORRECT));
+                }
             }
         }
         builder.help("if mutation is needed, store the value in an array slot or AtomicReference and read it inside the " + construct);

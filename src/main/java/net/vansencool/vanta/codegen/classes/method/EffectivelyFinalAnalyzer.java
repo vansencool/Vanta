@@ -265,8 +265,17 @@ public final class EffectivelyFinalAnalyzer {
                 restoreDu(intersection == null ? beforeBranches : intersection);
             } else if (node instanceof BreakStatement || node instanceof ContinueStatement) {
                 // jumps do not contribute to flow-out DU here
-            } else if (node instanceof LambdaExpression || node instanceof NewExpression) {
-                // nested scopes are analyzed separately when their own methods are emitted
+            } else if (node instanceof LambdaExpression le) {
+                Set<String> savedTracked = new HashSet<>(tracked);
+                Set<String> savedDu = snapshotDu();
+                for (Parameter p : le.parameters()) tracked.remove(p.name());
+                if (le.body() != null) visit(le.body());
+                else if (le.expressionBody() != null) visit(le.expressionBody());
+                tracked.clear();
+                tracked.addAll(savedTracked);
+                restoreDu(savedDu);
+            } else if (node instanceof NewExpression) {
+                // anonymous class bodies belong to their own method scopes; assignments inside do not count against the enclosing method's locals
             }
         }
     }
