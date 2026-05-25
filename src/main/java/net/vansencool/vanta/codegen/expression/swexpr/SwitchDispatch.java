@@ -2,8 +2,10 @@ package net.vansencool.vanta.codegen.expression.swexpr;
 
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
+import net.vansencool.vanta.codegen.diagnostic.sw.StringCaseLabelDiagnostic;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.util.desc.DescriptorUtils;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
@@ -151,7 +153,7 @@ public final class SwitchDispatch {
             if (v.startsWith("\"") && v.endsWith("\"")) v = v.substring(1, v.length() - 1);
             return v;
         }
-        throw new CodeGenException("Expected string literal in switch case", expr.line());
+        throw new CompilationException(StringCaseLabelDiagnostic.build(exprGen.ctx(), expr));
     }
 
     /**

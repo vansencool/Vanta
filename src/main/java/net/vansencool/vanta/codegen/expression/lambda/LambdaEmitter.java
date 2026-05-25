@@ -7,7 +7,10 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.classes.visitor.RecordingMethodVisitor;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.lambda.BoundMethodReferenceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.ConstructorReferenceDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaNoSamDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceNoSamDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaTargetDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceDiagnostic;
 import net.vansencool.vanta.codegen.exception.CodeGenException;
@@ -108,7 +111,7 @@ public final class LambdaEmitter {
             throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
         MethodSymbol samSym = findSam(ifaceSym);
         if (samSym == null)
-            throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
+            throw new CompilationException(MethodReferenceNoSamDiagnostic.build(ctx, ref, ifaceSym));
         String samName = samSym.name();
         String samDescriptor = samSym.descriptor();
         int samArity = samSym.parameterTypes().size();
@@ -147,7 +150,7 @@ public final class LambdaEmitter {
                 break;
             }
             if (targetSym == null)
-                throw new CodeGenException("No matching constructor for " + refTargetType.internalName(), ref.line());
+                throw new CompilationException(ConstructorReferenceDiagnostic.build(ctx, ref, refTargetSym, samArity));
         } else if (isCtorRef && refTargetIsType) {
             fallbackIsCtor = true;
             fallbackOwnerInternal = refTargetType.internalName();
@@ -197,7 +200,7 @@ public final class LambdaEmitter {
                     break;
                 }
             }
-            if (targetSym == null) throw new CodeGenException("No matching method " + ref.methodName(), ref.line());
+            if (targetSym == null) throw new CompilationException(BoundMethodReferenceDiagnostic.build(ctx, ref, recvSym, samArity));
         }
 
         Handle implHandle;
