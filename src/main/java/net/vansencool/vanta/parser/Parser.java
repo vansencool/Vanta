@@ -2,6 +2,9 @@ package net.vansencool.vanta.parser;
 
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
@@ -1019,46 +1022,57 @@ public final class Parser {
         while (true) {
             switch (current().type()) {
                 case PUBLIC -> {
+                    if ((mods & 0x0001) != 0) throwDuplicateModifier("public");
                     mods |= 0x0001;
                     advance();
                 }
                 case PRIVATE -> {
+                    if ((mods & 0x0002) != 0) throwDuplicateModifier("private");
                     mods |= 0x0002;
                     advance();
                 }
                 case PROTECTED -> {
+                    if ((mods & 0x0004) != 0) throwDuplicateModifier("protected");
                     mods |= 0x0004;
                     advance();
                 }
                 case STATIC -> {
+                    if ((mods & 0x0008) != 0) throwDuplicateModifier("static");
                     mods |= 0x0008;
                     advance();
                 }
                 case FINAL -> {
+                    if ((mods & 0x0010) != 0) throwDuplicateModifier("final");
                     mods |= 0x0010;
                     advance();
                 }
                 case ABSTRACT -> {
+                    if ((mods & 0x0400) != 0) throwDuplicateModifier("abstract");
                     mods |= 0x0400;
                     advance();
                 }
                 case NATIVE -> {
+                    if ((mods & 0x0100) != 0) throwDuplicateModifier("native");
                     mods |= 0x0100;
                     advance();
                 }
                 case SYNCHRONIZED -> {
+                    if ((mods & 0x0020) != 0) throwDuplicateModifier("synchronized");
                     mods |= 0x0020;
                     advance();
                 }
                 case TRANSIENT -> {
+                    if ((mods & 0x0080) != 0) throwDuplicateModifier("transient");
                     mods |= 0x0080;
                     advance();
                 }
                 case VOLATILE -> {
+                    if ((mods & 0x0040) != 0) throwDuplicateModifier("volatile");
                     mods |= 0x0040;
                     advance();
                 }
                 case STRICTFP -> {
+                    if ((mods & 0x0800) != 0) throwDuplicateModifier("strictfp");
                     mods |= 0x0800;
                     advance();
                 }
@@ -1066,6 +1080,64 @@ public final class Parser {
                     return mods;
                 }
             }
+            rejectConflictingModifiers(mods);
+        }
+    }
+
+    /**
+     * Throws a {@link CompilationException} flagging the current modifier
+     * token as a duplicate.
+     */
+    private void throwDuplicateModifier(@NotNull String name) {
+        Token tok = current();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("duplicate modifier `" + name + "`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                .highlight(tok.column() - 1, tok.column() - 1 + name.length())
+                .label("`" + name + "` already appears on this declaration")
+                .note("each access or behavior modifier may appear at most once on a single declaration")
+                .fix(new Fix(
+                        "remove the duplicate `" + name + "`",
+                        null,
+                        List.of(Edit.delete(tok.line(), tok.column() - 1, tok.column() - 1 + name.length() + 1, "duplicate `" + name + "`")),
+                        Applicability.MACHINE_APPLICABLE))
+                .build());
+    }
+
+    /**
+     * Throws when two modifiers are mutually exclusive (e.g. {@code public}
+     * with {@code private}, or {@code abstract} with {@code final}).
+     */
+    private void rejectConflictingModifiers(int mods) {
+        int access = mods & 0x0007;
+        if (Integer.bitCount(access) > 1) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("conflicting access modifiers")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("at most one of `public`, `private`, `protected` may appear on a declaration")
+                    .note("Java allows only a single access modifier per declaration")
+                    .build());
+        }
+        if ((mods & 0x0010) != 0 && (mods & 0x0400) != 0) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`abstract` and `final` cannot be combined")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("an abstract member cannot be final")
+                    .note("`abstract` requires that a subclass override the member; `final` forbids overriding")
+                    .build());
         }
     }
 
