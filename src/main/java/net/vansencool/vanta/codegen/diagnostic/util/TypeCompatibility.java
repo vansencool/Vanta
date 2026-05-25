@@ -151,8 +151,23 @@ public final class TypeCompatibility {
      */
     public static @NotNull String display(@NotNull ResolvedType type) {
         if (type == ResolvedType.NULL) return "null";
-        if (type.internalName() != null) return type.internalName().replace('/', '.');
-        return primitiveName(type.descriptor());
+        return displayDescriptor(type.descriptor());
+    }
+
+    /**
+     * @return human readable rendering of a JVM type descriptor (primitives, references, arrays)
+     */
+    public static @NotNull String displayDescriptor(@NotNull String desc) {
+        int dims = 0;
+        while (dims < desc.length() && desc.charAt(dims) == '[') dims++;
+        String element = desc.substring(dims);
+        String elementName;
+        if (element.startsWith("L") && element.endsWith(";")) {
+            elementName = element.substring(1, element.length() - 1).replace('/', '.');
+        } else {
+            elementName = primitiveName(element);
+        }
+        return dims == 0 ? elementName : elementName + "[]".repeat(dims);
     }
 
     private static @NotNull String primitiveName(@NotNull String desc) {

@@ -143,6 +143,7 @@ public final class LoopStatementEmitter {
         ctx.markReachable();
         mv.visitLabel(endLabel);
         ctx.labelContext().popLoop(null);
+        ctx.scope().removeVariablesFrom(savedSlot);
         ctx.scope().syncNextLocalIndex(savedSlot);
     }
 
@@ -218,6 +219,7 @@ public final class LoopStatementEmitter {
         ctx.markReachable();
         mv.visitLabel(endLabel);
         ctx.labelContext().popLoop(null);
+        ctx.scope().removeVariablesFrom(savedSlot);
         ctx.scope().syncNextLocalIndex(savedSlot);
     }
 
@@ -283,6 +285,7 @@ public final class LoopStatementEmitter {
         ctx.markReachable();
         mv.visitLabel(endLabel);
         ctx.labelContext().popLoop(null);
+        ctx.scope().removeVariablesFrom(savedSlot);
         ctx.scope().syncNextLocalIndex(savedSlot);
     }
 

@@ -2,7 +2,9 @@ package net.vansencool.vanta.codegen.expression.field;
 
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.name.UnresolvedFieldOwnerDiagnostic;
 import net.vansencool.vanta.codegen.expression.util.desc.DescriptorUtils;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
@@ -115,6 +117,9 @@ public final class FieldAccessEmitter {
                 return;
             }
             if (!"I".equals(ownerInternal) && ctx.typeInferrer().inferField(nameTarget.name()) == null && Character.isUpperCase(nameTarget.name().charAt(0))) {
+                if (!ctx.methodResolver().classpathManager().exists(ownerInternal)) {
+                    throw new CompilationException(UnresolvedFieldOwnerDiagnostic.build(ctx, fieldAccess, nameTarget.name()));
+                }
                 String desc = expected != null ? expected.descriptor() : "Ljava/lang/Object;";
                 ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, ownerInternal, fieldAccess.fieldName(), desc);
                 return;

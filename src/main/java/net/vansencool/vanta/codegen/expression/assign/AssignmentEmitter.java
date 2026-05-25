@@ -3,6 +3,7 @@ package net.vansencool.vanta.codegen.expression.assign;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.name.FinalReassignmentDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
@@ -54,6 +55,7 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
+                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value());
@@ -178,6 +180,7 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
+                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value(), local.type());

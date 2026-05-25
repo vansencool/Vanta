@@ -2,6 +2,7 @@ package net.vansencool.vanta.codegen.context;
 
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
+import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.resolver.ExpressionTypeInferrer;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.TypeResolver;
@@ -181,7 +182,16 @@ public final class MethodContext {
      * than the variable's first definite assignment so this is a safe over-approximation.
      */
     public @NotNull LocalVariable declareLocal(@NotNull String name, @NotNull ResolvedType type) {
-        LocalVariable lv = scope.declare(name, type);
+        return declareLocal(name, type, false, null);
+    }
+
+    /**
+     * Declares a local variable, recording the {@code isFinal} flag and
+     * originating AST node so downstream assignment checks can reject
+     * reassignment and quote the original declaration.
+     */
+    public @NotNull LocalVariable declareLocal(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, @Nullable AstNode declaration) {
+        LocalVariable lv = scope.declare(name, type, isFinal, declaration);
         Label start = methodStartLabel;
         if (start == null) {
             start = new Label();

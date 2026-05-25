@@ -154,11 +154,13 @@ public record MismatchAnalysis(@NotNull MismatchKind kind, @NotNull String mainT
         }
         if (isArrayDesc(target.descriptor()) || isArrayDesc(actual.descriptor())) {
             if (arrayDims(target.descriptor()) != arrayDims(actual.descriptor())) {
+                int targetDims = arrayDims(target.descriptor());
+                int actualDims = arrayDims(actual.descriptor());
                 return new MismatchAnalysis(
                         MismatchKind.ARRAY_DIM_MISMATCH,
                         "array dimension mismatch assigning " + actualDisplay + " to " + targetName,
-                        "expected " + arrayDims(target.descriptor()) + "-dimensional array, got " + arrayDims(actual.descriptor()),
-                        targetName + " is declared as " + targetDisplay + ", an array of one rank, but the right hand side has a different rank",
+                        "expected " + targetDims + "-dimensional array, got " + actualDims,
+                        targetName + " is declared as " + targetDisplay + " (" + targetDims + " dimension" + (targetDims == 1 ? "" : "s") + "), but the right hand side is " + actualDisplay + " (" + actualDims + " dimension" + (actualDims == 1 ? "" : "s") + ")",
                         List.of("adjust array creation to match dimensions: " + targetDisplay, "iterate the source array if you meant to assign an element"),
                         null);
             }

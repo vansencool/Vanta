@@ -2,6 +2,8 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.name.UnresolvedNameDiagnostic;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.codegen.expression.array.ArrayEmitter;
 import net.vansencool.vanta.codegen.expression.assign.AssignmentEmitter;
 import net.vansencool.vanta.codegen.expression.binary.BinaryExpressionEmitter;
@@ -545,6 +547,9 @@ public final class ExpressionGenerator {
             boolean isSelfConstant = resolved == null && ctx.nestedClassConstants() != null
                     && ctx.nestedClassConstants().getOrDefault(ctx.classInternalName(), Map.of()).containsKey(name.name());
             boolean isSelfStaticField = resolved == null && ctx.typeInferrer().isStaticField(name.name());
+            if (resolved == null && !isSelfConstant && !isSelfStaticField && fieldType == null) {
+                throw new CompilationException(UnresolvedNameDiagnostic.build(ctx, name));
+            }
             String fieldOwner = resolved != null ? resolved.owner() : ctx.classInternalName();
             if (resolvedStatic || isSelfStaticField || (!hasImplicitThis) || isSelfConstant) {
                 if (resolvedStatic && constantInliner.tryInline(resolved.owner(), resolved.name())) return;

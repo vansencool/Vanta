@@ -7,10 +7,14 @@ import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
+import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
+import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,10 +51,24 @@ public final class MethodResolutionDiagnostic {
                 .highlight(range.startCol(), range.endCol());
 
         if (targetType == null) {
+            String receiverName = receiverHeadName(call);
+            if (receiverName != null) {
+                String resolved = ctx.typeResolver().resolveInternalName(new TypeNode(receiverName, null, 0, call.line()));
+                if (ctx.methodResolver().classpathManager().exists(resolved)) {
+                    TypeSymbol owner = ctx.methodResolver().classpathManager().typeRegistry().lookup(resolved);
+                    if (owner != null) return KnownTypeNoStaticMethodDiagnostic.build(ctx, call, owner);
+                }
+            }
             ReceiverDiagnostic.attach(builder, ctx, call, spans);
         } else {
             CalleeDiagnostic.attach(builder, ctx, call, targetType);
         }
         return builder.build();
+    }
+
+    private static @Nullable String receiverHeadName(@NotNull MethodCallExpression call) {
+        if (call.target() instanceof NameExpression n) return n.name();
+        if (call.target() instanceof FieldAccessExpression fa && fa.target() instanceof NameExpression head) return head.name();
+        return null;
     }
 }

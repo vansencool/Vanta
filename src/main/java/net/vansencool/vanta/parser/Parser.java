@@ -1673,11 +1673,12 @@ public final class Parser {
     private @NotNull Expression parseAssignment() {
         Expression left = parseTernary();
         if (current().type().isAssignment()) {
-            int line = current().line();
+            Token opTok = current();
             String op = current().value();
             advance();
             Expression right = parseAssignment();
-            return new AssignmentExpression(left, op, right, line);
+            Token start = startTokenOf(left, opTok);
+            return span(start.line(), start.column(), new AssignmentExpression(left, op, right, opTok.line()));
         }
         return left;
     }
@@ -1991,10 +1992,14 @@ public final class Parser {
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
                         Token receiverStart = startTokenOf(expr, nameTok);
-                        expr = span(receiverStart, new MethodCallExpression(expr, name, args, null, nameTok.line()));
+                        MethodCallExpression call = span(receiverStart, new MethodCallExpression(expr, name, args, null, nameTok.line()));
+                        spanTable.recordSub(call, "methodName", new Span(nameTok.line(), nameTok.column(), nameTok.line(), nameTok.column() + name.length() - 1));
+                        expr = call;
                     } else {
                         Token receiverStart = startTokenOf(expr, nameTok);
-                        expr = span(receiverStart, new FieldAccessExpression(expr, name, nameTok.line()));
+                        FieldAccessExpression fa = span(receiverStart, new FieldAccessExpression(expr, name, nameTok.line()));
+                        spanTable.recordSub(fa, "fieldName", new Span(nameTok.line(), nameTok.column(), nameTok.line(), nameTok.column() + name.length() - 1));
+                        expr = fa;
                     }
                 }
             } else if (check(LEFT_BRACKET)) {

@@ -3,6 +3,7 @@ package net.vansencool.vanta.codegen;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.flow.UnreachableCodeDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.name.DuplicateLocalDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.typecheck.ReturnTypeDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
@@ -173,7 +174,10 @@ public final class StatementGenerator {
             } else {
                 resolvedType = ctx.typeResolver().resolve(effectiveType);
             }
-            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType);
+            LocalVariable preexisting = ctx.scope().resolve(declarator.name());
+            if (preexisting != null) throw new CompilationException(DuplicateLocalDiagnostic.build(ctx, varDecl, declarator.name(), preexisting));
+            boolean isFinalLocal = (varDecl.modifiers() & Opcodes.ACC_FINAL) != 0;
+            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType, isFinalLocal, varDecl);
 
             if (declarator.initializer() != null) {
                 ResolvedType initType = ctx.typeInferrer().infer(declarator.initializer());
