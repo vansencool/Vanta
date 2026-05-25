@@ -6,7 +6,12 @@ import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+
+import java.util.List;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
@@ -40,6 +45,7 @@ public final class FinalReassignmentDiagnostic {
         DiagnosticBuilder builder = Diagnostic.builder()
                 .severity(Severity.ERROR)
                 .sourceFile(cg.sourceFile())
+                .fullSource(cg.source())
                 .at(span.startLine(), sourceText)
                 .highlight(range.startCol(), range.endCol())
                 .title("cannot reassign final " + targetName)
@@ -50,11 +56,20 @@ public final class FinalReassignmentDiagnostic {
                 String declLine = SourceLines.lineAt(cg.source(), declSpan.startLine());
                 SourceRange declRange = SourceRange.ofSingleLine(declSpan, declLine.length());
                 builder.context(declSpan.startLine(), declLine, declRange.startCol(), declRange.endCol(), targetName + " declared final here");
+                int finalIdx = declLine.indexOf("final");
+                if (finalIdx >= 0) {
+                    int end = finalIdx + "final".length();
+                    if (end < declLine.length() && declLine.charAt(end) == ' ') end++;
+                    builder.fix(new Fix(
+                            "remove the 'final' modifier",
+                            "drops final so " + targetName + " can be reassigned",
+                            List.of(Edit.delete(declSpan.startLine(), finalIdx, end, "remove 'final'")),
+                            Applicability.MACHINE_APPLICABLE
+                    ));
+                }
             }
         }
         builder.note("final variables can be assigned exactly once at declaration or in the constructor, never again");
-        builder.help("remove the 'final' modifier on the declaration if reassignment is intentional");
-        builder.help("introduce a new non final variable to hold the new value");
         return builder.build();
     }
 }

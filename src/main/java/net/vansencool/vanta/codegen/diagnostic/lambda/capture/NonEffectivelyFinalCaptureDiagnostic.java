@@ -7,7 +7,12 @@ import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+
+import java.util.List;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
@@ -16,6 +21,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Diagnostic for a lambda or anonymous class that captures a local which is
@@ -45,6 +51,7 @@ public final class NonEffectivelyFinalCaptureDiagnostic {
         DiagnosticBuilder builder = Diagnostic.builder()
                 .severity(Severity.ERROR)
                 .sourceFile(cg.sourceFile())
+                .fullSource(cg.source())
                 .at(span.startLine(), sourceText)
                 .highlight(range.startCol(), range.endCol())
                 .title(construct + " captures '" + captured.name() + "', which is not effectively final")
@@ -81,10 +88,64 @@ public final class NonEffectivelyFinalCaptureDiagnostic {
                 if (!next.isEmpty()) builder.context(nextLine, next, 0, 0, null);
             }
         }
-        builder.help("declare '" + captured.name() + "' final and assign it exactly once at its declaration");
-        builder.help("snapshot before the " + construct + ": final " + TypeCompatibility.display(captured.type()) + " " + captured.name() + "Snapshot = " + captured.name() + ";");
+        if (captured.declaration() != null) {
+            Span declSpan = spans.span(captured.declaration());
+            if (declSpan != null) {
+                String declLine = SourceLines.lineAt(cg.source(), declSpan.startLine());
+                int firstNonSpace = 0;
+                while (firstNonSpace < declLine.length() && Character.isWhitespace(declLine.charAt(firstNonSpace))) firstNonSpace++;
+                int insertAt = positionForFinalKeyword(declLine, firstNonSpace);
+                if (insertAt >= 0) {
+                    String snippet = declLine.substring(insertAt).stripTrailing();
+                    String typeHint = snippet.split("\\s+", 2).length > 0 ? snippet.split("\\s+", 2)[0] : "type";
+                    builder.fix(new Fix(
+                            "declare '" + captured.name() + "' final",
+                            "marks the local final so the capture is permitted (insert before the type '" + typeHint + "')",
+                            List.of(Edit.insert(declSpan.startLine(), insertAt, "final ", "insert 'final' before '" + typeHint + "'")),
+                            Applicability.MACHINE_APPLICABLE));
+                }
+                String indent = declLine.substring(0, firstNonSpace);
+                String snapshotName = captured.name() + "Snapshot";
+                String snapshotLine = indent + "final " + TypeCompatibility.display(captured.type()) + " " + snapshotName + " = " + captured.name() + ";";
+                builder.fix(new Fix(
+                        "snapshot '" + captured.name() + "' before the " + construct,
+                        "captures a frozen copy that survives later reassignments",
+                        List.of(
+                                Edit.insertLineBefore(span.startLine(), snapshotLine, "insert snapshot line"),
+                                Edit.replace(span.startLine(), range.startCol(), range.endCol(), substituteName(sourceText, range, captured.name(), snapshotName), "use snapshot inside")
+                        ),
+                        Applicability.MAYBE_INCORRECT));
+            }
+        }
         builder.help("if mutation is needed, store the value in an array slot or AtomicReference and read it inside the " + construct);
         return builder.build();
+    }
+
+    /**
+     * Finds the column where {@code final} should be inserted on a local
+     * variable declaration line. Skips any leading access modifiers and
+     * {@code static} so the resulting token order stays {@code <access> <static> final <type>}.
+     * Returns {@code -1} when the line already contains {@code final}.
+     */
+    private static int positionForFinalKeyword(@NotNull String declLine, int firstNonSpace) {
+        int cursor = firstNonSpace;
+        while (true) {
+            int wordEnd = cursor;
+            while (wordEnd < declLine.length() && !Character.isWhitespace(declLine.charAt(wordEnd))) wordEnd++;
+            String word = declLine.substring(cursor, wordEnd);
+            if ("final".equals(word)) return -1;
+            if ("public".equals(word) || "private".equals(word) || "protected".equals(word) || "static".equals(word)) {
+                cursor = wordEnd;
+                while (cursor < declLine.length() && Character.isWhitespace(declLine.charAt(cursor))) cursor++;
+                continue;
+            }
+            return cursor;
+        }
+    }
+
+    private static @NotNull String substituteName(@NotNull String sourceText, @NotNull SourceRange range, @NotNull String oldName, @NotNull String newName) {
+        String slice = sourceText.substring(Math.max(0, range.startCol()), Math.min(sourceText.length(), range.endCol()));
+        return slice.replaceAll("\\b" + Pattern.quote(oldName) + "\\b", newName);
     }
 
     /**

@@ -5,7 +5,12 @@ import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+
+import java.util.List;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
@@ -34,15 +39,23 @@ public final class StringCaseLabelDiagnostic {
         SourceRange range = SourceRange.ofSingleLine(span, sourceText.length());
         String kind = label.getClass().getSimpleName();
 
+        String labelText = sourceText.substring(Math.max(0, range.startCol()), Math.min(sourceText.length(), range.endCol()));
+        String quoted = "\"" + labelText + "\"";
         return Diagnostic.builder()
                 .severity(Severity.ERROR)
                 .sourceFile(cg.sourceFile())
+                .fullSource(cg.source())
                 .at(span.startLine(), sourceText)
                 .highlight(range.startCol(), range.endCol())
                 .title("switch on String requires every case label to be a string constant expression")
                 .label("this case label is a " + kind + ", not a constant string")
                 .note("case labels in a String switch must be compile time constant strings (the JLS requires constant expressions)")
-                .help("inline the value as a quoted string literal, e.g. case \"value\":")
+                .fix(new Fix(
+                        "inline the constant as a quoted string literal",
+                        "rewrites the case label as the literal value the constant resolves to",
+                        List.of(Edit.replace(span.startLine(), range.startCol(), range.endCol(), quoted, "use a string literal here")),
+                        Applicability.HAS_PLACEHOLDER
+                ))
                 .build();
     }
 }

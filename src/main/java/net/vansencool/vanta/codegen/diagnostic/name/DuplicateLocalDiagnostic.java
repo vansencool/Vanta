@@ -6,7 +6,12 @@ import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
 import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+
+import java.util.List;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
@@ -37,15 +42,22 @@ public final class DuplicateLocalDiagnostic {
         String sourceText = SourceLines.lineAt(cg.source(), span.startLine());
         SourceRange range = SourceRange.ofSingleLine(span, sourceText.length());
 
+        int nameStartCol = sourceText.indexOf(name, range.startCol());
         return Diagnostic.builder()
                 .severity(Severity.ERROR)
                 .sourceFile(cg.sourceFile())
+                .fullSource(cg.source())
                 .at(span.startLine(), sourceText)
                 .highlight(range.startCol(), range.endCol())
                 .title("variable '" + name + "' is already declared in this scope")
                 .label("redeclaration of local '" + name + "'")
                 .note("'" + name + "' is already a local of type " + TypeCompatibility.display(existing.type()) + ", a second declaration in the same scope is not allowed")
-                .help("rename this declaration, or drop the type prefix to assign to the existing variable")
+                .fix(nameStartCol >= 0 ? new Fix(
+                        "rename to '" + name + "2'",
+                        "keep both bindings distinct",
+                        List.of(Edit.replace(span.startLine(), nameStartCol, nameStartCol + name.length(), name + "2", "rename here")),
+                        Applicability.MAYBE_INCORRECT
+                ) : new Fix("rename this declaration", null, List.of(), Applicability.UNSPECIFIED))
                 .build();
     }
 }

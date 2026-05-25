@@ -6,7 +6,12 @@ import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
+
+import java.util.List;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.statement.Statement;
@@ -41,6 +46,7 @@ public final class UnreachableCodeDiagnostic {
         DiagnosticBuilder builder = Diagnostic.builder()
                 .severity(Severity.ERROR)
                 .sourceFile(cg.sourceFile())
+                .fullSource(source)
                 .at(span.startLine(), sourceText)
                 .highlight(range.startCol(), range.endCol())
                 .title("unreachable statement")
@@ -49,8 +55,19 @@ public final class UnreachableCodeDiagnostic {
         SourceRange termRange = SourceRange.ofSingleLine(termSpan, termText.length());
         builder.context(termSpan.startLine(), termText, termRange.startCol(), termRange.endCol(), "control flow leaves the block here");
         builder.note("the preceding statement always terminates this block (return, throw, break, continue, or an infinite loop without break)");
-        builder.help("delete the unreachable statement");
-        builder.help("if it should run, move it above the terminator or remove the terminator's unconditional exit");
+        builder.fix(new Fix(
+                "delete the unreachable statement",
+                null,
+                List.of(Edit.delete(span.startLine(), range.startCol(), range.endCol(), "remove this statement")),
+                Applicability.MACHINE_APPLICABLE));
+        builder.fix(new Fix(
+                "move this statement above the terminator",
+                "swap order so it runs before control flow leaves the block",
+                List.of(
+                        Edit.insertLineBefore(termSpan.startLine(), sourceText.stripTrailing(), "move this here"),
+                        Edit.delete(span.startLine(), range.startCol(), range.endCol(), "delete original")
+                ),
+                Applicability.MAYBE_INCORRECT));
         return builder.build();
     }
 }

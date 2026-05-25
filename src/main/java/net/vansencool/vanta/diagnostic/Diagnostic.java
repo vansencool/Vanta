@@ -1,5 +1,7 @@
 package net.vansencool.vanta.diagnostic;
 
+import net.vansencool.vanta.diagnostic.fix.Fix;
+import net.vansencool.vanta.diagnostic.fix.FixRenderer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,8 +28,10 @@ public final class Diagnostic {
     private final @NotNull List<ContextLine> contextLines;
     private final @NotNull List<String> notes;
     private final @NotNull List<String> helpLines;
+    private final @NotNull List<Fix> fixes;
+    private final @Nullable String fullSource;
 
-    Diagnostic(@NotNull Severity severity, @NotNull String title, @Nullable String sourceFile, int line, @NotNull String sourceText, int columnStart, int columnEnd, @Nullable String underlineLabel, @NotNull List<SubHighlight> subHighlights, @NotNull List<ContextLine> contextLines, @NotNull List<String> notes, @NotNull List<String> helpLines) {
+    Diagnostic(@NotNull Severity severity, @NotNull String title, @Nullable String sourceFile, int line, @NotNull String sourceText, int columnStart, int columnEnd, @Nullable String underlineLabel, @NotNull List<SubHighlight> subHighlights, @NotNull List<ContextLine> contextLines, @NotNull List<String> notes, @NotNull List<String> helpLines, @NotNull List<Fix> fixes, @Nullable String fullSource) {
         this.severity = severity;
         this.title = title;
         this.sourceFile = sourceFile;
@@ -38,6 +42,8 @@ public final class Diagnostic {
         this.contextLines = contextLines;
         this.notes = notes;
         this.helpLines = helpLines;
+        this.fixes = fixes;
+        this.fullSource = fullSource;
         if (columnStart == -1 && columnEnd == -1) {
             String stripped = sourceText.stripTrailing();
             this.columnStart = stripped.length() - stripped.stripLeading().length();
@@ -100,6 +106,10 @@ public final class Diagnostic {
         return helpLines;
     }
 
+    public @NotNull List<Fix> fixes() {
+        return fixes;
+    }
+
     public @NotNull String format() {
         StringBuilder sb = new StringBuilder();
         String prefix = severity == Severity.ERROR ? "error" : "warning";
@@ -156,6 +166,11 @@ public final class Diagnostic {
         }
         for (String note : notes) sb.append("  = note: ").append(note).append('\n');
         for (String h : helpLines) sb.append("  = help: ").append(h).append('\n');
+        if (!fixes.isEmpty() && fullSource != null) {
+            for (Fix fix : fixes) {
+                sb.append(FixRenderer.render(fix, fullSource, sourceFile));
+            }
+        }
         return sb.toString();
     }
 
