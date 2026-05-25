@@ -52,7 +52,16 @@ public final class MethodArgumentEmitter {
      * @param methodDescriptor resolved method descriptor
      */
     public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor) {
-        generateArgs(args, methodDescriptor, null);
+        generateArgs(args, methodDescriptor, null, false);
+    }
+
+    /**
+     * @param args             call arguments
+     * @param methodDescriptor resolved method descriptor
+     * @param isVarargs        true when the resolved method's last parameter is a varargs slot
+     */
+    public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, boolean isVarargs) {
+        generateArgs(args, methodDescriptor, null, isVarargs);
     }
 
     /**
@@ -69,10 +78,17 @@ public final class MethodArgumentEmitter {
      *                         parameter types and varargs flag
      */
     public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective) {
+        generateArgs(args, methodDescriptor, reflective, reflective != null && reflective.isVarArgs());
+    }
+
+    /**
+     * Generates argument values with both a reflective handle for generics and
+     * an explicit varargs flag for source resolved methods.
+     */
+    public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective, boolean isVarargsMethod) {
         MethodContext ctx = exprGen.ctx();
         Type[] paramTypes = ctx.methodResolver().classpathManager().argumentTypes(methodDescriptor);
         java.lang.reflect.Type[] genericParams = reflective != null ? reflective.getGenericParameterTypes() : null;
-        boolean isVarargsMethod = reflective != null && reflective.isVarArgs();
         boolean needsVarargPack = false;
         int varargStart = -1;
         if (isVarargsMethod && paramTypes.length > 0 && paramTypes[paramTypes.length - 1].getSort() == Type.ARRAY) {
@@ -98,7 +114,7 @@ public final class MethodArgumentEmitter {
             return;
         }
         for (int i = 0; i < varargStart; i++) {
-            java.lang.reflect.Type gpt = i < genericParams.length ? genericParams[i] : null;
+            java.lang.reflect.Type gpt = (genericParams != null && i < genericParams.length) ? genericParams[i] : null;
             emitArg(args.get(i), paramTypes[i], gpt);
         }
         Type arrayType = paramTypes[varargStart];
@@ -256,13 +272,13 @@ public final class MethodArgumentEmitter {
         if (outerSelf != null && resolved == null) {
             desc = outerSelf.descriptor();
             if (outerSelf.isStatic()) {
-                generateArgs(call.arguments(), desc);
+                generateArgs(call.arguments(), desc, outerSelf.isVarargs());
                 String staticOwner = outerSelf.owner().equals(ctx.superInternalName()) ? ctx.classInternalName() : outerSelf.owner();
                 mv.visitMethodInsn(Opcodes.INVOKESTATIC, staticOwner, outerSelf.name(), desc, false);
             } else if (!staticOnly) {
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                 mv.visitFieldInsn(Opcodes.GETFIELD, ctx.classInternalName(), "this$0", "L" + outerInternal + ";");
-                generateArgs(call.arguments(), desc);
+                generateArgs(call.arguments(), desc, outerSelf.isVarargs());
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, outerSelf.owner(), outerSelf.name(), desc, false);
             } else {
                 return null;

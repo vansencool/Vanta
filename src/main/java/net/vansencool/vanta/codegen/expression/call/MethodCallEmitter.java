@@ -187,7 +187,7 @@ public final class MethodCallEmitter {
             int savedDiscard = exprGen.discardDepth();
             exprGen.discardDepth(0);
             try {
-                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor());
+                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor(), selfInfo.isVarargs());
             } finally {
                 exprGen.discardDepth(savedDiscard);
             }
@@ -209,7 +209,7 @@ public final class MethodCallEmitter {
             selfResolved = exprGen.methodResolutionHelper().resolveInheritedProtectedMethod(ctx.superInternalName(), call.methodName(), call.arguments().size());
         }
         if (selfResolved != null && selfResolved.opcode() == Opcodes.INVOKESTATIC) {
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor());
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
             String staticOwner = selfResolved.owner();
             if (staticOwner.equals(ctx.superInternalName())) staticOwner = ctx.classInternalName();
             mv.visitMethodInsn(selfResolved.opcode(), staticOwner, selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
@@ -217,10 +217,17 @@ public final class MethodCallEmitter {
         }
         if (selfResolved != null) {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor());
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
             mv.visitMethodInsn(selfResolved.opcode(), selfResolved.owner(), selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
             return !selfResolved.descriptor().endsWith(")V");
         }
         throw new CompilationException(SelfMethodDiagnostic.build(ctx, call));
+    }
+
+    /**
+     * @return true when the resolved method's underlying symbol is declared as varargs
+     */
+    private static boolean isVarargs(@NotNull MethodResolver.ResolvedMethod resolved) {
+        return resolved.symbol() != null && resolved.symbol().isVarargs();
     }
 }

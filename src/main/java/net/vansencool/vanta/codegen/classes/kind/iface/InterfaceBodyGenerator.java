@@ -92,7 +92,8 @@ public final class InterfaceBodyGenerator {
                 for (Parameter p : methodDecl.parameters()) paramTypes.add(p.type());
                 String desc = owner.typeResolver().methodDescriptor(paramTypes, methodDecl.returnType());
                 boolean isStatic = (methodDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
-                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic);
+                boolean isVarargs = !methodDecl.parameters().isEmpty() && methodDecl.parameters().get(methodDecl.parameters().size() - 1).isVarargs();
+                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic, isVarargs);
                 String baseKey = methodDecl.name() + ":" + methodDecl.parameters().size();
                 if (!selfMethods.containsKey(baseKey)) selfMethods.put(baseKey, info);
                 else selfMethods.put(baseKey + "#" + desc, info);

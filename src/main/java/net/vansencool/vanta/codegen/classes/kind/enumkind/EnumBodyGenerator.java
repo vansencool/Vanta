@@ -269,7 +269,8 @@ public final class EnumBodyGenerator {
                 List<TypeNode> paramTypes = new ArrayList<>();
                 for (Parameter p : md.parameters()) paramTypes.add(p.type());
                 String desc = owner.typeResolver().methodDescriptor(paramTypes, md.returnType());
-                selfMethods.put(md.name() + ":" + md.parameters().size(), new SelfMethodInfo(subclassInternal, md.name(), desc, false));
+                boolean isVarargs = !md.parameters().isEmpty() && md.parameters().get(md.parameters().size() - 1).isVarargs();
+                selfMethods.put(md.name() + ":" + md.parameters().size(), new SelfMethodInfo(subclassInternal, md.name(), desc, false, isVarargs));
             }
         }
         String[] savedOuter = owner.swapOuter(owner.currentEnclosingOuter(), enumInternal);

@@ -1,9 +1,7 @@
 package net.vansencool.vanta.codegen.diagnostic.util;
 
 import net.vansencool.vanta.codegen.ExpressionGenerator;
-import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.expression.Expression;
-import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,7 +27,7 @@ public final class TypeCompatibility {
         if (actual == null) return true;
         if (target.descriptor().equals(actual.descriptor())) return true;
         if (actual == ResolvedType.NULL) return !target.isPrimitive();
-        if (target.isPrimitive() && actual.isPrimitive()) return primitiveAssignable(target.descriptor(), actual.descriptor(), source);
+        if (target.isPrimitive() && actual.isPrimitive()) return primitiveAssignable(exprGen, target.descriptor(), actual.descriptor(), source);
         if (target.isPrimitive() && !actual.isPrimitive()) return unboxAssignable(target.descriptor(), actual);
         if (!target.isPrimitive() && actual.isPrimitive()) return boxAssignable(target, actual.descriptor());
         if (target.descriptor().startsWith("[") && actual.descriptor().startsWith("[")) return arrayAssignable(exprGen, target, actual);
@@ -57,16 +55,22 @@ public final class TypeCompatibility {
         return false;
     }
 
-    private static boolean primitiveAssignable(@NotNull String targetDesc, @NotNull String actualDesc, @NotNull Expression source) {
+    private static boolean primitiveAssignable(@NotNull ExpressionGenerator exprGen, @NotNull String targetDesc, @NotNull String actualDesc, @NotNull Expression source) {
         if (targetDesc.equals(actualDesc)) return true;
         int t = primRank(targetDesc);
         int a = primRank(actualDesc);
         if (t < 0 || a < 0) return false;
         if (t >= a && !crossesIntegralFloatLine(actualDesc, targetDesc)) return true;
-        if (source instanceof LiteralExpression lit && lit.literalType() == TokenType.INT_LITERAL) {
-            return intLiteralFitsNarrowTarget(targetDesc, lit);
-        }
-        return false;
+        if (!"I".equals(actualDesc) && !"J".equals(actualDesc) && !"S".equals(actualDesc)) return false;
+        if (!"B".equals(targetDesc) && !"S".equals(targetDesc) && !"C".equals(targetDesc)) return false;
+        Integer folded = exprGen.constantEvaluator().intValue(source);
+        if (folded == null) return false;
+        return switch (targetDesc) {
+            case "B" -> folded >= Byte.MIN_VALUE && folded <= Byte.MAX_VALUE;
+            case "S" -> folded >= Short.MIN_VALUE && folded <= Short.MAX_VALUE;
+            case "C" -> folded >= Character.MIN_VALUE && folded <= Character.MAX_VALUE;
+            default -> false;
+        };
     }
 
     private static int primRank(@NotNull String desc) {
@@ -89,25 +93,15 @@ public final class TypeCompatibility {
         return actualFloating && !targetFloating;
     }
 
-    private static boolean intLiteralFitsNarrowTarget(@NotNull String targetDesc, @NotNull LiteralExpression lit) {
-        try {
-            long value = Long.parseLong(lit.value().replace("_", ""));
-            return switch (targetDesc) {
-                case "B" -> value >= Byte.MIN_VALUE && value <= Byte.MAX_VALUE;
-                case "S" -> value >= Short.MIN_VALUE && value <= Short.MAX_VALUE;
-                case "C" -> value >= Character.MIN_VALUE && value <= Character.MAX_VALUE;
-                default -> false;
-            };
-        } catch (NumberFormatException ignored) {
-            return false;
-        }
-    }
-
     private static boolean unboxAssignable(@NotNull String targetPrimDesc, @NotNull ResolvedType actualBoxed) {
         if (actualBoxed.internalName() == null) return false;
         String boxedPrim = wrapperPrimitiveDesc(actualBoxed.internalName());
         if (boxedPrim == null) return false;
-        return primitiveAssignable(targetPrimDesc, boxedPrim, dummy());
+        if (boxedPrim.equals(targetPrimDesc)) return true;
+        int t = primRank(targetPrimDesc);
+        int a = primRank(boxedPrim);
+        if (t < 0 || a < 0) return false;
+        return t >= a && !crossesIntegralFloatLine(boxedPrim, targetPrimDesc);
     }
 
     private static boolean boxAssignable(@NotNull ResolvedType target, @NotNull String actualPrimDesc) {
@@ -175,10 +169,4 @@ public final class TypeCompatibility {
             default -> desc;
         };
     }
-
-    private static @NotNull Expression dummy() {
-        return DUMMY;
-    }
-
-    private static final Expression DUMMY = new LiteralExpression(TokenType.NULL, "null", 0);
 }

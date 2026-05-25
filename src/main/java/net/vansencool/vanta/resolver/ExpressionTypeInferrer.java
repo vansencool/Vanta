@@ -527,6 +527,10 @@ public final class ExpressionTypeInferrer {
         if (call.target() == null) {
             ResolvedType selfResult = lookupInstanceReturn(classInternalName, call, null);
             if (selfResult != null) return selfResult;
+            if (selfMethods != null) {
+                SelfMethodInfo info = selfMethods.get(call.methodName() + ":" + call.arguments().size());
+                if (info != null) return descriptorReturnType(info.descriptor());
+            }
             String staticOwner = typeResolver.resolveStaticMethodOwner(call.methodName());
             if (staticOwner != null) {
                 ResolvedType result = lookupStaticReturn(staticOwner, call);
@@ -537,6 +541,13 @@ public final class ExpressionTypeInferrer {
             if (checkOuter != null) {
                 ResolvedType outerResult = lookupInstanceReturn(checkOuter, call, null);
                 if (outerResult != null) return outerResult;
+                if (nestedClassMethods != null) {
+                    Map<String, SelfMethodInfo> nm = nestedClassMethods.get(checkOuter);
+                    if (nm != null) {
+                        SelfMethodInfo info = nm.get(call.methodName() + ":" + call.arguments().size());
+                        if (info != null) return descriptorReturnType(info.descriptor());
+                    }
+                }
             }
             return lookupInstanceReturn("java/lang/Object", call, null);
         }

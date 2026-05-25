@@ -713,7 +713,8 @@ public final class ClassGenerator {
                 for (Parameter p : methodDecl.parameters()) paramTypes.add(p.type());
                 String desc = typeResolver.methodDescriptor(paramTypes, methodDecl.returnType());
                 boolean isStatic = (methodDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
-                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic);
+                boolean isVarargs = !methodDecl.parameters().isEmpty() && methodDecl.parameters().get(methodDecl.parameters().size() - 1).isVarargs();
+                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic, isVarargs);
                 String baseKey = methodDecl.name() + ":" + methodDecl.parameters().size();
                 if (!selfMethods.containsKey(baseKey)) selfMethods.put(baseKey, info);
                 else selfMethods.put(baseKey + "#" + desc, info);
@@ -781,8 +782,9 @@ public final class ClassGenerator {
                 for (Parameter p : md.parameters()) paramTypes.add(p.type());
                 String desc = typeResolver.methodDescriptor(paramTypes, md.returnType());
                 boolean isStatic = (md.modifiers() & Opcodes.ACC_STATIC) != 0;
+                boolean isVarargs = !md.parameters().isEmpty() && md.parameters().get(md.parameters().size() - 1).isVarargs();
                 String key = md.name() + ":" + md.parameters().size();
-                methods.putIfAbsent(key, new SelfMethodInfo(internalName, md.name(), desc, isStatic));
+                methods.putIfAbsent(key, new SelfMethodInfo(internalName, md.name(), desc, isStatic, isVarargs));
             }
         }
         nestedClassMethods.put(internalName, methods);

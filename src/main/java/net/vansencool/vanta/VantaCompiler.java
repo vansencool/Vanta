@@ -259,16 +259,22 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      */
     public void registerSources(@NotNull Map<String, CompilationUnit> parsed) {
         TypeRegistry registry = classpathManager.typeRegistry();
+        Map<String, TypeResolver> resolvers = new HashMap<>();
         for (Map.Entry<String, CompilationUnit> e : parsed.entrySet()) {
             CompilationUnit cu = e.getValue();
             TypeResolver tr = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
+            resolvers.put(e.getKey(), tr);
+            registry.register(e.getKey(), cu, tr);
+        }
+        for (Map.Entry<String, CompilationUnit> e : parsed.entrySet()) {
+            CompilationUnit cu = e.getValue();
+            TypeResolver tr = resolvers.get(e.getKey());
             for (AstNode typeDecl : cu.typeDeclarations()) {
                 if (typeDecl instanceof ClassDeclaration cd) {
                     String outerInternalName = toInternalName(cd.name(), cu.packageName());
                     registerInnerClasses(tr, cd, outerInternalName);
                 }
             }
-            registry.register(e.getKey(), cu, tr);
         }
     }
 

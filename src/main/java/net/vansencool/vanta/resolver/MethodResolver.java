@@ -16,7 +16,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves method, field, and constructor references against the classpath
@@ -24,8 +23,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * and invoke opcodes the codegen needs.
  */
 public record MethodResolver(@NotNull ClasspathManager classpathManager) {
-
-    private static final ConcurrentHashMap<Long, Boolean> ASSIGNABLE_CACHE = new ConcurrentHashMap<>();
 
     public static boolean isDescriptorAssignable(@NotNull String argDesc, @NotNull String paramDesc) {
         return isAssignable(argDesc, paramDesc, null);
@@ -56,16 +53,11 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
             return "Ljava/lang/Object;".equals(paramDesc) || "Ljava/lang/Cloneable;".equals(paramDesc) || "Ljava/io/Serializable;".equals(paramDesc);
         }
         if (!argDesc.startsWith("L") || !paramDesc.startsWith("L")) return false;
-        long key = ((long) argDesc.hashCode() << 32) ^ (paramDesc.hashCode() & 0xffffffffL);
-        Boolean cached = ASSIGNABLE_CACHE.get(key);
-        if (cached != null) return cached;
         String argInternal = argDesc.substring(1, argDesc.length() - 1);
         String paramInternal = paramDesc.substring(1, paramDesc.length() - 1);
-        boolean result = registry != null
+        return registry != null
                 ? isSubtype(argInternal, paramInternal, registry)
                 : forNameSubtype(argInternal, paramInternal);
-        ASSIGNABLE_CACHE.put(key, result);
-        return result;
     }
 
     /**
@@ -482,6 +474,51 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
      * Resolves a constructor with full argument descriptors. Falls back to
      * count based matching when no exact descriptor match exists.
      */
+    /**
+     * @param ownerInternal   internal name of the constructor's owner
+     * @param argDescriptors  inferred argument descriptors
+     * @return matched constructor symbol when one is resolvable, including varargs candidates
+     */
+    public @Nullable MethodSymbol resolveConstructorSymbol(@NotNull String ownerInternal, @NotNull List<String> argDescriptors) {
+        TypeRegistry registry = classpathManager.typeRegistry();
+        TypeSymbol owner = registry.lookup(ownerInternal);
+        if (owner == null) return null;
+        MethodSymbol best = null;
+        for (MethodSymbol m : owner.methods()) {
+            if (!"<init>".equals(m.name())) continue;
+            if ((m.access() & Opcodes.ACC_PRIVATE) != 0) continue;
+            if (m.parameterTypes().size() != argDescriptors.size()) continue;
+            if (!isApplicable(m, argDescriptors, registry)) continue;
+            if (best == null) best = m;
+            else if (isMoreSpecific(registry, best.parameterTypes(), m.parameterTypes(), argDescriptors)) best = m;
+        }
+        if (best != null) return best;
+        for (MethodSymbol m : owner.methods()) {
+            if (!"<init>".equals(m.name())) continue;
+            if ((m.access() & Opcodes.ACC_PRIVATE) != 0) continue;
+            if (!m.isVarargs()) continue;
+            int fixed = m.parameterTypes().size() - 1;
+            if (argDescriptors.size() < fixed) continue;
+            boolean ok = true;
+            for (int i = 0; i < fixed; i++) {
+                if (!isAssignable(argDescriptors.get(i), m.parameterTypes().get(i).descriptor(), registry)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) continue;
+            String elemDesc = m.parameterTypes().get(fixed).descriptor().substring(1);
+            for (int i = fixed; i < argDescriptors.size(); i++) {
+                if (!isAssignable(argDescriptors.get(i), elemDesc, registry)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return m;
+        }
+        return null;
+    }
+
     public @Nullable String resolveConstructor(@NotNull String ownerInternal, @NotNull List<String> argDescriptors) {
         TypeRegistry registry = classpathManager.typeRegistry();
         TypeSymbol owner = registry.lookup(ownerInternal);
