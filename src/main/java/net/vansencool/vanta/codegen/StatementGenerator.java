@@ -177,7 +177,8 @@ public final class StatementGenerator {
             LocalVariable preexisting = ctx.scope().resolve(declarator.name());
             if (preexisting != null) throw new CompilationException(DuplicateLocalDiagnostic.build(ctx, varDecl, declarator.name(), preexisting));
             boolean isFinalLocal = (varDecl.modifiers() & Opcodes.ACC_FINAL) != 0;
-            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType, isFinalLocal, varDecl);
+            boolean hasInit = declarator.initializer() != null;
+            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType, isFinalLocal, hasInit, varDecl);
 
             if (declarator.initializer() != null) {
                 ResolvedType initType = ctx.typeInferrer().infer(declarator.initializer());

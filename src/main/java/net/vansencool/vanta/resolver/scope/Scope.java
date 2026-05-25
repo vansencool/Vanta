@@ -47,9 +47,13 @@ public final class Scope {
     }
 
     public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, @Nullable AstNode declaration) {
+        return declare(name, type, isFinal, false, declaration);
+    }
+
+    public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, boolean hasInitializer, @Nullable AstNode declaration) {
         int index = nextLocalIndex;
         nextLocalIndex += type.stackSize();
-        LocalVariable var = new LocalVariable(name, type, index, isFinal, declaration);
+        LocalVariable var = new LocalVariable(name, type, index, isFinal, hasInitializer, declaration);
         variables.put(name, var);
         return var;
     }

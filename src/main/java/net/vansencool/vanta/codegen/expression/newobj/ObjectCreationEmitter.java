@@ -9,6 +9,7 @@ import net.vansencool.vanta.codegen.MethodGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.lambda.capture.NonEffectivelyFinalCaptureDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.type.UnresolvedTypeDiagnostic;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.AstNode;
@@ -116,6 +117,11 @@ public final class ObjectCreationEmitter {
 
             LinkedHashMap<String, LocalVariable> anonCaptures = new LinkedHashMap<>();
             exprGen.expressionWalker().collectAnonCaptures(newExpr.anonymousClassBody(), anonCaptures);
+            for (LocalVariable cap : anonCaptures.values()) {
+                if (!ctx.isEffectivelyFinal(cap)) {
+                    throw new CompilationException(NonEffectivelyFinalCaptureDiagnostic.build(ctx, newExpr, cap, "anonymous class"));
+                }
+            }
 
             ClasspathManager cp = ctx.methodResolver().classpathManager();
             ClassWriter anonCw = createAnonClassWriter(cp);

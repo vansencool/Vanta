@@ -17,6 +17,7 @@ import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceTargetDiagn
 import net.vansencool.vanta.codegen.diagnostic.lambda.MissingFunctionalInterfaceDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaTargetDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.capture.NonEffectivelyFinalCaptureDiagnostic;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
@@ -297,6 +298,11 @@ public final class LambdaEmitter {
         boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
         boolean needsThis = hasImplicitThis && lambdaReferencesThis(lambda, lambdaParamNames);
         collectLambdaCaptures(lambda, lambdaParamNames, captures);
+        for (LocalVariable cap : captures.values()) {
+            if (!ctx.isEffectivelyFinal(cap)) {
+                throw new CompilationException(NonEffectivelyFinalCaptureDiagnostic.build(ctx, lambda, cap, "lambda"));
+            }
+        }
 
         List<ResolvedType> lambdaParamTypes = new ArrayList<>();
         for (int i = 0; i < lambda.parameters().size(); i++) {

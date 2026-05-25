@@ -116,20 +116,8 @@ public final class Diagnostic {
         sb.append(gutter).append('\n');
 
         for (ContextLine cl : contextLines) {
-            String ctxTrimmed = cl.source().stripTrailing();
-            String ctxLineNum = String.valueOf(cl.line());
-            String padded = " ".repeat(maxLineNum.length() - ctxLineNum.length()) + ctxLineNum;
-            sb.append(padded).append(" | ").append(ctxTrimmed).append('\n');
-            int ctxStart = Math.max(0, Math.min(cl.columnStart(), ctxTrimmed.length()));
-            int ctxEnd = Math.max(ctxStart + 1, Math.min(cl.columnEnd(), ctxTrimmed.length()));
-            sb.append(gutter).append(" ".repeat(ctxStart + 1)).append("~".repeat(Math.max(1, ctxEnd - ctxStart)));
-            if (cl.label() != null) sb.append(' ').append(cl.label());
-            sb.append('\n');
-            sb.append(gutter).append('\n');
-            if (cl.line() + 1 < line) {
-                sb.append(" ".repeat(maxLineNum.length())).append(" ...").append('\n');
-                sb.append(gutter).append('\n');
-            }
+            if (cl.line() > line) continue;
+            renderContextLine(sb, cl, maxLineNum, gutter);
         }
 
         String lineNum = String.valueOf(line);
@@ -155,6 +143,11 @@ public final class Diagnostic {
         }
         sb.append(gutter).append('\n');
 
+        for (ContextLine cl : contextLines) {
+            if (cl.line() <= line) continue;
+            renderContextLine(sb, cl, maxLineNum, gutter);
+        }
+
         if (longLine) {
             for (SubHighlight sh : subHighlights) {
                 if (sh.label() == null) continue;
@@ -164,5 +157,24 @@ public final class Diagnostic {
         for (String note : notes) sb.append("  = note: ").append(note).append('\n');
         for (String h : helpLines) sb.append("  = help: ").append(h).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * Renders one context line block (source line plus its underline) into {@code sb}.
+     * Skips the underline row when {@code columnEnd} is zero so callers can show a
+     * surrounding source line without flagging any columns.
+     */
+    private void renderContextLine(@NotNull StringBuilder sb, @NotNull ContextLine cl, @NotNull String maxLineNum, @NotNull String gutter) {
+        String ctxTrimmed = cl.source().stripTrailing();
+        String ctxLineNum = String.valueOf(cl.line());
+        String padded = " ".repeat(maxLineNum.length() - ctxLineNum.length()) + ctxLineNum;
+        sb.append(padded).append(" | ").append(ctxTrimmed).append('\n');
+        if (cl.columnEnd() <= 0) return;
+        int ctxStart = Math.max(0, Math.min(cl.columnStart(), ctxTrimmed.length()));
+        int ctxEnd = Math.max(ctxStart + 1, Math.min(cl.columnEnd(), ctxTrimmed.length()));
+        sb.append(gutter).append(" ".repeat(ctxStart + 1)).append("~".repeat(Math.max(1, ctxEnd - ctxStart)));
+        if (cl.label() != null) sb.append(' ').append(cl.label());
+        sb.append('\n');
+        sb.append(gutter).append('\n');
     }
 }

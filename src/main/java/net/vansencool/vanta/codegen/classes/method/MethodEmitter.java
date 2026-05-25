@@ -389,6 +389,7 @@ public final class MethodEmitter {
             scope.syncNextLocalIndex(nextSlot);
 
             MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, isStaticMethod, selfMethods);
+            ctx.seedReassignedLocals(EffectivelyFinalAnalyzer.analyze(methodDecl));
             ctx.enclosingOuterInternal(owner.currentEnclosingOuter());
             ctx.enclosingStaticOuter(owner.currentStaticOuter());
             ctx.nestedClassFields(owner.nestedClassFields());
