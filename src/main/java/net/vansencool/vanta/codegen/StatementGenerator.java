@@ -2,7 +2,6 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.codegen.statement.loop.LoopStatementEmitter;
 import net.vansencool.vanta.codegen.statement.pattern.PatternBindingHelper;
@@ -115,7 +114,7 @@ public final class StatementGenerator {
         } else if (stmt instanceof AssertStatement assertStmt) {
             generateAssert(assertStmt);
         } else {
-            throw new CodeGenException("Unsupported statement type: " + stmt.getClass().getSimpleName(), stmt.line());
+            throw new IllegalStateException("internal compiler error: unhandled statement kind " + stmt.getClass().getSimpleName() + " at line " + stmt.line());
         }
     }
 

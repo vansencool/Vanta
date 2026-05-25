@@ -5,7 +5,6 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.method.MethodResolutionDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.method.SelfMethodDiagnostic;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;

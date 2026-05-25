@@ -4,7 +4,6 @@ import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.lambda.LambdaEmitter;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
 import net.vansencool.vanta.codegen.expression.util.cmp.ComparisonOpcodes;
@@ -152,7 +151,7 @@ public final class BinaryExpressionEmitter {
             case "<<" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHL : Opcodes.ISHL);
             case ">>" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHR : Opcodes.ISHR);
             case ">>>" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LUSHR : Opcodes.IUSHR);
-            default -> throw new CodeGenException("Unknown binary operator: " + op, binary.line());
+            default -> throw new IllegalStateException("internal compiler error: parser produced unknown binary operator '" + op + "' at line " + binary.line());
         }
     }
 

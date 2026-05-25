@@ -2,7 +2,6 @@ package net.vansencool.vanta.codegen.expression.literal;
 
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
@@ -75,7 +74,7 @@ public final class LiteralEmitter {
             case TRUE -> mv.visitInsn(Opcodes.ICONST_1);
             case FALSE -> mv.visitInsn(Opcodes.ICONST_0);
             case NULL -> mv.visitInsn(Opcodes.ACONST_NULL);
-            default -> throw new CodeGenException("Unknown literal type: " + lit.literalType(), lit.line());
+            default -> throw new IllegalStateException("internal compiler error: parser produced unknown literal kind " + lit.literalType() + " at line " + lit.line());
         }
     }
 }

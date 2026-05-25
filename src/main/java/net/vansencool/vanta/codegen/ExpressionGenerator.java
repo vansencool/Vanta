@@ -2,7 +2,6 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.array.ArrayEmitter;
 import net.vansencool.vanta.codegen.expression.assign.AssignmentEmitter;
 import net.vansencool.vanta.codegen.expression.binary.BinaryExpressionEmitter;
@@ -335,7 +334,7 @@ public final class ExpressionGenerator {
         } else if (expr instanceof MethodReferenceExpression methodRef) {
             lambdaEmitter.emitMethodReference(methodRef, expected);
         } else {
-            throw new CodeGenException("Unsupported expression type: " + expr.getClass().getSimpleName(), expr.line());
+            throw new IllegalStateException("internal compiler error: unhandled expression kind " + expr.getClass().getSimpleName() + " at line " + expr.line());
         }
     }
 

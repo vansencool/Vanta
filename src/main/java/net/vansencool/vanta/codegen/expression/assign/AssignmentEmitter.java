@@ -3,7 +3,6 @@ package net.vansencool.vanta.codegen.expression.assign;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.codegen.expression.coercion.NumericCoercion;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
@@ -321,7 +320,7 @@ public final class AssignmentEmitter {
             case "<<=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHL : Opcodes.ISHL);
             case ">>=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHR : Opcodes.ISHR);
             case ">>>=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LUSHR : Opcodes.IUSHR);
-            default -> throw new CodeGenException("Unknown compound assignment: " + operator, 0);
+            default -> throw new IllegalStateException("internal compiler error: parser produced unknown compound assignment operator '" + operator + "'");
         }
     }
 

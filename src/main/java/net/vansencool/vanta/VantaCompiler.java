@@ -2,10 +2,6 @@ package net.vansencool.vanta;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
-import net.vansencool.vanta.diagnostic.Diagnostic;
-import net.vansencool.vanta.diagnostic.Severity;
-import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.Lexer;
 import net.vansencool.vanta.lexer.token.Token;
@@ -226,13 +222,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
             }
 
             return result;
-        } catch (CodeGenException e) {
-            throw new CompilationException(Diagnostic.builder()
-                    .severity(Severity.ERROR)
-                    .title(e.rawMessage())
-                    .sourceFile(sourceFile)
-                    .at(e.line(), SourceLines.lineAt(source, e.line()))
-                    .build());
         } catch (CompilationException e) {
             throw e;
         } catch (RuntimeException e) {

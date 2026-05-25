@@ -3,7 +3,6 @@ package net.vansencool.vanta.codegen.expression.swexpr;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.diagnostic.sw.StringCaseLabelDiagnostic;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.util.desc.DescriptorUtils;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.TokenType;
@@ -139,12 +138,8 @@ public final class SwitchDispatch {
     }
 
     /**
-     * Extracts the literal string value of a case label expression, stripping
-     * surrounding double quotes.
-     *
      * @param expr case label expression
-     * @return the unquoted string value
-     * @throws CodeGenException when {@code expr} is not a string literal
+     * @return the unquoted string value of {@code expr} when it is a string literal
      */
     public @NotNull String stringLiteralValue(@NotNull Expression expr) {
         Expression cur = exprGen.unwrapParens(expr);

@@ -4,7 +4,6 @@ import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.codegen.expression.coercion.NumericCoercion;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
 import net.vansencool.vanta.codegen.expression.util.dup.DupOpcodes;
@@ -121,13 +120,13 @@ public final class UnaryExpressionEmitter {
                 }
                 case "++" -> emitIncDec(unary, 1, true);
                 case "--" -> emitIncDec(unary, -1, true);
-                default -> throw new CodeGenException("Unknown prefix operator: " + op, unary.line());
+                default -> throw new IllegalStateException("internal compiler error: parser produced unknown prefix unary operator '" + op + "' at line " + unary.line());
             }
         } else {
             switch (op) {
                 case "++" -> emitIncDec(unary, 1, false);
                 case "--" -> emitIncDec(unary, -1, false);
-                default -> throw new CodeGenException("Unknown postfix operator: " + op, unary.line());
+                default -> throw new IllegalStateException("internal compiler error: parser produced unknown postfix unary operator '" + op + "' at line " + unary.line());
             }
         }
     }

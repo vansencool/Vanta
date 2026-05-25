@@ -10,7 +10,6 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.type.UnresolvedTypeDiagnostic;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
