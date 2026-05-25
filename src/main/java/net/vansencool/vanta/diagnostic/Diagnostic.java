@@ -112,7 +112,7 @@ public final class Diagnostic {
         String gutter = " ".repeat(maxLineNum.length()) + " |";
 
         String location = sourceFile != null ? sourceFile + ":" + line : "line " + line;
-        sb.append("  -> ").append(location).append(": ").append(trimmed.stripLeading()).append('\n');
+        sb.append("  -> ").append(location).append('\n');
         sb.append(gutter).append('\n');
 
         for (ContextLine cl : contextLines) {

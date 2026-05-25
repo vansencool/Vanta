@@ -17,6 +17,7 @@ import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.classes.scan.AnonCounter;
 import net.vansencool.vanta.codegen.classes.scan.AssertScanner;
 import net.vansencool.vanta.codegen.classes.writer.VantaClassWriter;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
@@ -70,6 +71,7 @@ public final class ClassGenerator {
     private final @Nullable String sourceFile;
     private final @NotNull String source;
     private final @NotNull SpanTable spanTable;
+    private @Nullable DiagnosticReport report;
 
     private final @NotNull AtomicInteger lambdaCounter = new AtomicInteger(0);
     private final @NotNull List<byte[]> anonClassBytecodes = new ArrayList<>();
@@ -291,6 +293,20 @@ public final class ClassGenerator {
      */
     public @NotNull SpanTable spanTable() {
         return spanTable;
+    }
+
+    /**
+     * @return active diagnostic report sink for batch error recovery, or null when single error mode
+     */
+    public @Nullable DiagnosticReport report() {
+        return report;
+    }
+
+    /**
+     * Sets the diagnostic report sink for batch error recovery.
+     */
+    public void report(@Nullable DiagnosticReport report) {
+        this.report = report;
     }
 
     /**

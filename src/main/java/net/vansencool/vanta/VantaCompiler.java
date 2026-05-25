@@ -3,6 +3,9 @@ package net.vansencool.vanta;
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.diagnostic.imp.ImportValidator;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
+import net.vansencool.vanta.exception.CompilationException;
+import net.vansencool.vanta.exception.MultiCompilationException;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.Lexer;
 import net.vansencool.vanta.lexer.token.Token;
@@ -193,44 +196,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * keyed by its internal name.
      */
     public @NotNull Map<String, byte[]> compile(@NotNull String source, @Nullable String sourceFile) {
-        return compile(parse(source, sourceFile), source, sourceFile);
-    }
-
-    /**
-     * Compiles an already parsed {@link CompilationUnit}. Use this when the AST
-     * has been produced separately (for example by {@link #parseAll}) so the
-     * source is not re-parsed.
-     *
-     * @param source the original source text, retained for diagnostic rendering
-     */
-    public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile) {
-        try {
-            ImportValidator.validate(classpathManager, source, sourceFile, cu);
-            TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
-            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile, source, cu.spanTable());
-
-            Map<String, byte[]> result = new HashMap<>();
-
-            for (AstNode typeDecl : cu.typeDeclarations()) {
-                if (typeDecl instanceof ClassDeclaration classDecl) {
-                    String outerInternalName = toInternalName(classDecl.name(), cu.packageName());
-                    registerInnerClasses(typeResolver, classDecl, outerInternalName);
-                    Map<String, byte[]> innerBytecodes = classGenerator.generateInnerClasses(classDecl, cu.packageName());
-                    byte[] bytecode = classGenerator.generate(classDecl, cu.packageName());
-                    result.put(outerInternalName, bytecode);
-                    result.putAll(innerBytecodes);
-                    result.putAll(classGenerator.getAndClearAnonClassBytecodes());
-                }
-            }
-
-            return result;
-        } catch (CompilationException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            System.err.println("[Vanta] Unexpected failure compiling " + sourceFile + ": " + e);
-            e.printStackTrace(System.err);
-            throw e;
-        }
+        return compile(parse(source, sourceFile), source, sourceFile, null);
     }
 
     /**
@@ -243,13 +209,53 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     public @NotNull Map<String, byte[]> compileAll(@NotNull Map<String, String> sources) {
         Map<String, CompilationUnit> parsed = parseAll(sources);
         registerSources(parsed);
+        DiagnosticReport report = new DiagnosticReport();
         Map<String, byte[]> result = new HashMap<>();
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             String path = entry.getKey();
             String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-            result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
+            try {
+                result.putAll(compile(parsed.get(path), entry.getValue(), fileName, report));
+            } catch (CompilationException e) {
+                report.report(fileName, null, e.diagnostic());
+            }
         }
+        if (report.hasErrors()) throw new MultiCompilationException(report);
         return result;
+    }
+
+    /**
+     * Compiles a single parsed unit. When {@code report} is non null,
+     * recoverable errors inside individual methods are appended to the report
+     * and emission continues with stub bodies; otherwise the first failure
+     * throws.
+     */
+    public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile, @Nullable DiagnosticReport report) {
+        try {
+            ImportValidator.validate(classpathManager, source, sourceFile, cu);
+            TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
+            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile, source, cu.spanTable());
+            classGenerator.report(report);
+            Map<String, byte[]> result = new HashMap<>();
+            for (AstNode typeDecl : cu.typeDeclarations()) {
+                if (typeDecl instanceof ClassDeclaration classDecl) {
+                    String outerInternalName = toInternalName(classDecl.name(), cu.packageName());
+                    registerInnerClasses(typeResolver, classDecl, outerInternalName);
+                    Map<String, byte[]> innerBytecodes = classGenerator.generateInnerClasses(classDecl, cu.packageName());
+                    byte[] bytecode = classGenerator.generate(classDecl, cu.packageName());
+                    result.put(outerInternalName, bytecode);
+                    result.putAll(innerBytecodes);
+                    result.putAll(classGenerator.getAndClearAnonClassBytecodes());
+                }
+            }
+            return result;
+        } catch (CompilationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            System.err.println("[Vanta] Unexpected failure compiling " + sourceFile + ": " + e);
+            e.printStackTrace(System.err);
+            throw e;
+        }
     }
 
     /**
@@ -318,7 +324,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                     String path = entry.getKey();
                     String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
                     try {
-                        result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
+                        result.putAll(compile(parsed.get(path), entry.getValue(), fileName, null));
                     } catch (RuntimeException e) {
                         firstFailure.compareAndSet(null, e);
                     }
@@ -382,7 +388,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                 String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
                 if (mw > 1) MethodParallelism.current(mw);
                 try {
-                    result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
+                    result.putAll(compile(parsed.get(path), entry.getValue(), fileName, null));
                 } catch (Throwable e) {
                     System.err.println("DBG fail " + path + ": " + e);
                     if (e instanceof RuntimeException re) firstFailure.compareAndSet(null, re);

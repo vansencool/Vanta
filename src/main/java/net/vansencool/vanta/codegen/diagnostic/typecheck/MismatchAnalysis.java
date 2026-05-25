@@ -49,6 +49,15 @@ public record MismatchAnalysis(@NotNull MismatchKind kind, @NotNull String mainT
                     null);
         }
         String actualDisplay = TypeCompatibility.display(actual);
+        if ("V".equals(target.descriptor())) {
+            return new MismatchAnalysis(
+                    MismatchKind.VOID_RESULT,
+                    "void method cannot return a value",
+                    "this method has no return type, the value here is discarded by void",
+                    targetName + " is void, void methods may only use 'return;' without a value",
+                    List.of("drop the returned expression: 'return;'", "change the method's return type to " + actualDisplay + " if returning the value is intended"),
+                    null);
+        }
         if ("V".equals(actual.descriptor())) {
             return new MismatchAnalysis(
                     MismatchKind.VOID_RESULT,
