@@ -284,6 +284,7 @@ public final class MethodArgumentEmitter {
         } else {
             return null;
         }
+        if (resolved != null) exprGen.emitGenericReturnCheckcast(call, resolved);
         return desc.endsWith(")V") ? 0 : 1;
     }
 }

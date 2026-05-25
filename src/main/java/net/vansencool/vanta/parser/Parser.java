@@ -940,15 +940,14 @@ public final class Parser {
             advance();
             if (check(EXTENDS)) {
                 advance();
-                TypeNode bound = parseType();
-                return new TypeNode("? extends " + bound, null, 0, line);
+                return parseType();
             }
             if (check(SUPER)) {
                 advance();
-                TypeNode bound = parseType();
-                return new TypeNode("? super " + bound, null, 0, line);
+                parseType();
+                return new TypeNode("java/lang/Object", null, 0, line);
             }
-            return new TypeNode("?", null, 0, line);
+            return new TypeNode("java/lang/Object", null, 0, line);
         }
         return parseType();
     }
@@ -1452,14 +1451,14 @@ public final class Parser {
      * @return the return statement node
      */
     private @NotNull ReturnStatement parseReturnStatement() {
-        int line = current().line();
+        Token start = current();
         expect(RETURN);
         Expression value = null;
         if (!check(SEMICOLON)) {
             value = parseExpression();
         }
         expect(SEMICOLON);
-        return new ReturnStatement(value, line);
+        return span(start, new ReturnStatement(value, start.line()));
     }
 
     /**
@@ -1574,10 +1573,10 @@ public final class Parser {
      * @return the expression statement node
      */
     private @NotNull ExpressionStatement parseExpressionStatement() {
-        int line = current().line();
+        Token start = current();
         Expression expr = parseExpression();
         expect(SEMICOLON);
-        return new ExpressionStatement(expr, line);
+        return span(start, new ExpressionStatement(expr, start.line()));
     }
 
     /**
@@ -1623,7 +1622,7 @@ public final class Parser {
      * @return the variable declaration statement
      */
     private @NotNull VariableDeclarationStatement parseLocalVariableDeclarationNoSemicolon() {
-        int line = current().line();
+        Token start = current();
         List<AnnotationNode> annotations = parseAnnotations();
         int modifiers = parseModifiers();
         TypeNode type = parseType();
@@ -1633,7 +1632,7 @@ public final class Parser {
             advance();
             declarators.add(parseVariableDeclarator());
         }
-        return new VariableDeclarationStatement(type, declarators, modifiers, annotations, line);
+        return span(start, new VariableDeclarationStatement(type, declarators, modifiers, annotations, start.line()));
     }
 
     /**

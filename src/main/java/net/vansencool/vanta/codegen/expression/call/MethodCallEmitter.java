@@ -193,6 +193,8 @@ public final class MethodCallEmitter {
             }
             int opcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
             mv.visitMethodInsn(opcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), false);
+            MethodResolver.ResolvedMethod resolvedSelf = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(ctx.classInternalName(), call.methodName(), call.arguments());
+            if (resolvedSelf != null) exprGen.emitGenericReturnCheckcast(call, resolvedSelf);
             return !selfInfo.descriptor().endsWith(")V");
         }
         if (ctx.enclosingOuterInternal() != null || ctx.enclosingStaticOuter() != null) {

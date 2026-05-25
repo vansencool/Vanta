@@ -775,6 +775,8 @@ public final class ClassGenerator {
         Map<String, SelfMethodInfo> methods = new HashMap<>();
         for (AstNode member : classDecl.members()) {
             if (member instanceof MethodDeclaration md) {
+                if (md.typeParameters() != null && !md.typeParameters().isEmpty())
+                    typeResolver.registerTypeParameters(md.typeParameters());
                 List<TypeNode> paramTypes = new ArrayList<>();
                 for (Parameter p : md.parameters()) paramTypes.add(p.type());
                 String desc = typeResolver.methodDescriptor(paramTypes, md.returnType());
