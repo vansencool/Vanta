@@ -3,6 +3,7 @@ package net.vansencool.vanta.codegen.diagnostic.method;
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
+import net.vansencool.vanta.codegen.diagnostic.util.StringDistance;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
@@ -10,7 +11,6 @@ import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
-import net.vansencool.vanta.codegen.diagnostic.util.StringDistance;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;

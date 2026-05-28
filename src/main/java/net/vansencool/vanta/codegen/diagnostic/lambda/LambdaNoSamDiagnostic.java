@@ -4,7 +4,6 @@ import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.util.SourceRange;
 import net.vansencool.vanta.diagnostic.Diagnostic;
-import net.vansencool.vanta.diagnostic.DiagnosticBuilder;
 import net.vansencool.vanta.diagnostic.Severity;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.parser.ast.expression.LambdaExpression;

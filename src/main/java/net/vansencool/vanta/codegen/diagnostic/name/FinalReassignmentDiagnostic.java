@@ -10,13 +10,13 @@ import net.vansencool.vanta.diagnostic.fix.Applicability;
 import net.vansencool.vanta.diagnostic.fix.Edit;
 import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
-
-import java.util.List;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 /**
  * Diagnostic for an assignment to a target marked {@code final}.

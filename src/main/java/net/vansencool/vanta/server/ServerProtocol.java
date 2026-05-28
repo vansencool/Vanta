@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * <pre>
  * COMPILE
  * CLASSPATH: entry1:entry2   (optional)
- * THREADS: smart             (optional; smart = auto parallel, files=N, methods=N, hybrid=F,M, or bare int for file workers)
+ * THREADS: files=N           (optional; files=N, methods=N, hybrid=F,M, or bare int for file workers)
  * FILES: N
  *
  * FILE: Foo.java
@@ -125,10 +125,9 @@ public final class ServerProtocol {
 
     /**
      * Parses the value of a {@code THREADS:} header into a {@link ParallelMode}.
-     * Accepts: {@code smart}, {@code files=N}, {@code methods=N}, {@code hybrid=F,M}, or a bare integer for file workers.
+     * Accepts: {@code files=N}, {@code methods=N}, {@code hybrid=F,M}, or a bare integer for file workers.
      */
     private static @Nullable ParallelMode parseThreads(@NotNull String value) {
-        if (value.equals("smart")) return ParallelMode.smart();
         if (value.startsWith("files=")) {
             try {
                 return ParallelMode.files(Integer.parseInt(value.substring(6)));

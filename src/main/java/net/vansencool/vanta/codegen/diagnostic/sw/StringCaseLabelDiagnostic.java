@@ -9,12 +9,12 @@ import net.vansencool.vanta.diagnostic.fix.Applicability;
 import net.vansencool.vanta.diagnostic.fix.Edit;
 import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
-
-import java.util.List;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * Diagnostic for a case label in a {@code String} switch that is not a string literal.

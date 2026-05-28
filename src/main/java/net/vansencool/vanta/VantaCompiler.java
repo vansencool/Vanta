@@ -6,7 +6,6 @@ import net.vansencool.vanta.codegen.diagnostic.imp.ImportValidator;
 import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.exception.MultiCompilationException;
-import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.Lexer;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.parser.Parser;
@@ -22,7 +21,6 @@ import org.jetbrains.annotations.Nullable;
 import java.net.URLClassLoader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -298,7 +296,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * @return map from class internal name to bytecode bytes
      */
     public @NotNull Map<String, byte[]> compileAllParallel(@NotNull Map<String, String> sources, @NotNull ParallelMode mode) {
-        if (mode.isSmart()) return compileAllSmart(sources, mode.maxThreads(), mode.heavyPercentile());
         int fileWorkers = Math.min(mode.fileWorkers(), sources.size());
         if (sources.size() <= 1 || fileWorkers <= 1) {
             MethodParallelism.current(mode.methodWorkers());
@@ -341,70 +338,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         } finally {
             MethodParallelism.clear();
         }
-    }
-
-    /**
-     * Smart-mode compilation. Uses work-stealing via one-task-per-file dispatch.
-     * Files whose source length is dramatically larger than the median (outliers)
-     * receive dedicated method workers; everything else runs pure file-parallel.
-     * File worker count is clamped to min(maxThreads, 8) because past 8 workers
-     * gains are noise and queue contention rises.
-     */
-    private @NotNull Map<String, byte[]> compileAllSmart(@NotNull Map<String, String> sources, int maxThreads, int heavyPercentile) {
-        if (sources.size() <= 1) return compileAll(sources);
-        int fileWorkers = Math.min(Math.min(maxThreads, 8), sources.size());
-        if (fileWorkers <= 1) return compileAll(sources);
-        ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
-        Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
-        registerSources(parsed);
-        int[] lengths = sources.values().stream().mapToInt(String::length).sorted().toArray();
-        int median = lengths[lengths.length / 2];
-        int p95 = lengths[Math.min(lengths.length - 1, (int) (lengths.length * 0.95))];
-        boolean worthHeavy = p95 >= median * 4;
-        int threshold = worthHeavy ? lengths[(int) (lengths.length * heavyPercentile / 100.0)] : Integer.MAX_VALUE;
-        Set<String> heavyKeys;
-        int methodWorkersForHeavy;
-        if (worthHeavy) {
-            heavyKeys = new HashSet<>();
-            for (Map.Entry<String, String> e : sources.entrySet()) {
-                if (e.getValue().length() >= threshold) heavyKeys.add(e.getKey());
-            }
-            int spare = Math.max(0, maxThreads - fileWorkers);
-            methodWorkersForHeavy = heavyKeys.isEmpty() ? 1 : Math.max(2, 1 + spare / heavyKeys.size());
-        } else {
-            heavyKeys = Collections.emptySet();
-            methodWorkersForHeavy = 1;
-        }
-        Map<String, byte[]> result = new ConcurrentHashMap<>();
-        AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
-        List<Map.Entry<String, String>> ordered = new ArrayList<>(sources.entrySet());
-        ordered.sort(new LongestFirst());
-        List<Future<?>> futures = new ArrayList<>(sources.size());
-        for (Map.Entry<String, String> entry : ordered) {
-            int mw = heavyKeys.contains(entry.getKey()) ? methodWorkersForHeavy : 1;
-            futures.add(pool.submit(() -> {
-                if (firstFailure.get() != null) return;
-                String path = entry.getKey();
-                String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-                if (mw > 1) MethodParallelism.current(mw);
-                try {
-                    result.putAll(compile(parsed.get(path), entry.getValue(), fileName, null));
-                } catch (Throwable e) {
-                    System.err.println("DBG fail " + path + ": " + e);
-                    if (e instanceof RuntimeException re) firstFailure.compareAndSet(null, re);
-                } finally {
-                    if (mw > 1) MethodParallelism.clear();
-                }
-            }));
-        }
-        for (Future<?> f : futures) {
-            try {
-                f.get();
-            } catch (Exception ignored) {
-            }
-        }
-        if (firstFailure.get() != null) throw firstFailure.get();
-        return result;
     }
 
     /**

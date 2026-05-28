@@ -9,11 +9,11 @@ import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnosti
 import net.vansencool.vanta.codegen.diagnostic.typecheck.ReturnTypeDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
-import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.codegen.statement.loop.LoopStatementEmitter;
 import net.vansencool.vanta.codegen.statement.pattern.PatternBindingHelper;
 import net.vansencool.vanta.codegen.statement.sw.SwitchStatementEmitter;
 import net.vansencool.vanta.codegen.statement.tryblock.TryStatementEmitter;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.NewArrayExpression;

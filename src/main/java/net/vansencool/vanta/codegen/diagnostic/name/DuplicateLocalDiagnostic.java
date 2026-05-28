@@ -10,13 +10,13 @@ import net.vansencool.vanta.diagnostic.fix.Applicability;
 import net.vansencool.vanta.diagnostic.fix.Edit;
 import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
-
-import java.util.List;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.span.Span;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * Diagnostic for a local variable declaration whose name already exists in the enclosing scope.
