@@ -96,6 +96,7 @@ public final class ExpressionGenerator {
     private final @NotNull NumericCoercion numericCoercion = new NumericCoercion(this);
     private int discardDepth = 0;
     private @Nullable String lastCheckcastType = null;
+    private @Nullable ResolvedType currentExpected = null;
     private @Nullable String lastEmittedAnonInternal = null;
     private @Nullable ResolvedType currentReceiverType;
     private boolean suppressGenericReturnCheckcast = false;
@@ -297,6 +298,16 @@ public final class ExpressionGenerator {
      * @param expected the expected target type for {@code expr}, or null if none
      */
     public void generate(@NotNull Expression expr, @Nullable ResolvedType expected) {
+        ResolvedType prevExpected = currentExpected;
+        currentExpected = expected;
+        try {
+            generateInner(expr, expected);
+        } finally {
+            currentExpected = prevExpected;
+        }
+    }
+
+    private void generateInner(@NotNull Expression expr, @Nullable ResolvedType expected) {
         if (expr instanceof LiteralExpression lit) {
             LiteralEmitter.emit(ctx.mv(), lit, expected);
         } else if (expr instanceof NameExpression name) {
@@ -632,6 +643,7 @@ public final class ExpressionGenerator {
             unboxingEmitter.emit(ctx.mv(), inferred.descriptor());
             return;
         }
+        if (currentExpected != null && "java/lang/Object".equals(currentExpected.internalName())) return;
         String inferredDesc = inferred.descriptor();
         if (inferredDesc.indexOf('?') >= 0) return;
         if (inferredDesc.startsWith("[")) {
