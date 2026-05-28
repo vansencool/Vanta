@@ -165,6 +165,15 @@ public final class ConstantEvaluator {
                 return null;
             }
         }
+        if (expr instanceof UnaryExpression u && u.isPrefix() && ("-".equals(u.operator()) || "+".equals(u.operator()) || "~".equals(u.operator()))) {
+            Integer inner = intValue(u.operand());
+            if (inner == null) return null;
+            return switch (u.operator()) {
+                case "-" -> -inner;
+                case "~" -> ~inner;
+                default -> inner;
+            };
+        }
         String owner = null;
         String field = null;
         if (expr instanceof NameExpression ne) {
