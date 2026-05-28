@@ -593,7 +593,12 @@ public final class ExpressionGenerator {
         if (discardDepth > 0) return;
         if (suppressGenericReturnCheckcast) return;
         ResolvedType inferred = ctx.typeInferrer().infer(call);
-        if (inferred == null || inferred.isPrimitive()) return;
+        if (inferred == null) return;
+        if (inferred.isPrimitive()) {
+            if (!"Ljava/lang/Object;".equals(ret)) return;
+            unboxingEmitter.emit(ctx.mv(), inferred.descriptor());
+            return;
+        }
         String inferredDesc = inferred.descriptor();
         if (inferredDesc.indexOf('?') >= 0) return;
         if (inferredDesc.startsWith("[")) {
