@@ -250,7 +250,7 @@ public final class ConditionEmitter {
             exprGen.generate(instanceOf.expression());
             mv.visitTypeInsn(Opcodes.CHECKCAST, internalName);
             ResolvedType patternType = ResolvedType.ofObject(internalName);
-            LocalVariable patternVar = ctx.declareLocal(instanceOf.patternVariable(), patternType);
+            LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
             mv.visitVarInsn(Opcodes.ASTORE, patternVar.index());
 
             mv.visitLabel(falseLabel);
@@ -276,7 +276,7 @@ public final class ConditionEmitter {
         String internalName = ctx.typeResolver().resolveInternalName(instanceOf.type());
         MethodVisitor mv = ctx.mv();
         ResolvedType patternType = ResolvedType.ofObject(internalName);
-        LocalVariable patternVar = ctx.declareLocal(instanceOf.patternVariable(), patternType);
+        LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
         Expression expr = exprGen.unwrapParens(instanceOf.expression());
         if (expr instanceof NameExpression name && ctx.scope().resolve(name.name()) != null) {
             exprGen.generate(instanceOf.expression());
@@ -317,7 +317,7 @@ public final class ConditionEmitter {
         String internalName = ctx.typeResolver().resolveInternalName(instanceOf.type());
         MethodVisitor mv = ctx.mv();
         ResolvedType patternType = ResolvedType.ofObject(internalName);
-        LocalVariable patternVar = ctx.declareLocal(instanceOf.patternVariable(), patternType);
+        LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
         Expression expr = exprGen.unwrapParens(instanceOf.expression());
         if (expr instanceof NameExpression name && ctx.scope().resolve(name.name()) != null) {
             exprGen.generate(instanceOf.expression());

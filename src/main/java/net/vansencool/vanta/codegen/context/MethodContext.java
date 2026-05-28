@@ -215,6 +215,23 @@ public final class MethodContext {
     }
 
     /**
+     * Declares a pattern binding for {@code instanceof} pattern matching.
+     * Pattern bindings are tagged so the duplicate local check treats them as
+     * shadowable when later code introduces a regular local with the same name.
+     */
+    public @NotNull LocalVariable declarePatternLocal(@NotNull String name, @NotNull ResolvedType type) {
+        LocalVariable lv = scope.declarePattern(name, type);
+        Label start = methodStartLabel;
+        if (start == null) {
+            start = new Label();
+            mv.visitLabel(start);
+            methodStartLabel = start;
+        }
+        openLocal(name, type.descriptor(), null, start, lv.index());
+        return lv;
+    }
+
+    /**
      * Records that {@code name} was reassigned at AST node {@code at}. Idempotent so
      * calling at emit time after pre seeding does not duplicate entries.
      */

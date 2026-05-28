@@ -53,7 +53,20 @@ public final class Scope {
     public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, boolean hasInitializer, @Nullable AstNode declaration) {
         int index = nextLocalIndex;
         nextLocalIndex += type.stackSize();
-        LocalVariable var = new LocalVariable(name, type, index, isFinal, hasInitializer, declaration);
+        LocalVariable var = new LocalVariable(name, type, index, isFinal, hasInitializer, false, declaration);
+        variables.put(name, var);
+        return var;
+    }
+
+    /**
+     * Declares a pattern binding from {@code instanceof}. Pattern vars have
+     * conditional scope (visible only where the pattern matches) so the
+     * duplicate local check treats existing pattern vars as shadowable.
+     */
+    public @NotNull LocalVariable declarePattern(@NotNull String name, @NotNull ResolvedType type) {
+        int index = nextLocalIndex;
+        nextLocalIndex += type.stackSize();
+        LocalVariable var = new LocalVariable(name, type, index, false, true, true, null);
         variables.put(name, var);
         return var;
     }
