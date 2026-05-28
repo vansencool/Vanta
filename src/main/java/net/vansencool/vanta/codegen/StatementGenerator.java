@@ -2,6 +2,7 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.flow.JumpOutsideLoopDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.flow.UnreachableCodeDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.name.DuplicateLocalDiagnostic;
 import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnostic;
@@ -376,7 +377,9 @@ public final class StatementGenerator {
      * @param breakStmt the break statement
      */
     private void generateBreak(@NotNull BreakStatement breakStmt) {
-        ctx.mv().visitJumpInsn(Opcodes.GOTO, ctx.labelContext().breakLabel(breakStmt.label()));
+        Label target = ctx.labelContext().breakLabelOrNull(breakStmt.label());
+        if (target == null) throw new CompilationException(JumpOutsideLoopDiagnostic.build(ctx, breakStmt, "break", "loop or switch"));
+        ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
         if (breakStmt.label() == null) ctx.labelContext().markCurrentLoopBreak();
         ctx.markUnreachable();
     }
@@ -388,10 +391,9 @@ public final class StatementGenerator {
      */
     private void generateContinue(@NotNull ContinueStatement continueStmt) {
         Label target = ctx.labelContext().continueLabel(continueStmt.label());
-        if (target != null) {
-            ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
-            ctx.markUnreachable();
-        }
+        if (target == null) throw new CompilationException(JumpOutsideLoopDiagnostic.build(ctx, continueStmt, "continue", "loop"));
+        ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
+        ctx.markUnreachable();
     }
 
     /**

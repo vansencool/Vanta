@@ -69,6 +69,18 @@ public final class LabelContext {
     }
 
     /**
+     * @return the innermost break label, or null when not inside a loop or switch
+     */
+    public @Nullable Label breakLabelOrNull(@Nullable String label) {
+        if (label != null) {
+            LoopLabels named = namedLabels.get(label);
+            if (named != null) return named.breakLabel;
+        }
+        LoopLabels top = loopStack.peek();
+        return top != null ? top.breakLabel : null;
+    }
+
+    /**
      * Gets the continue label for the innermost loop, or a named label.
      *
      * @param label the label name, or null for the innermost
@@ -79,8 +91,10 @@ public final class LabelContext {
             LoopLabels named = namedLabels.get(label);
             if (named != null) return named.continueLabel;
         }
-        LoopLabels top = loopStack.peek();
-        return top != null ? top.continueLabel : null;
+        for (LoopLabels frame : loopStack) {
+            if (frame.continueLabel != null) return frame.continueLabel;
+        }
+        return null;
     }
 
     /**

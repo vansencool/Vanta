@@ -599,6 +599,7 @@ public final class Parser {
             }
         }
 
+        Token typeStart = current();
         TypeNode returnType = parseType();
 
         if (returnType.name().equals(enclosingName) && check(LEFT_PAREN)) {
@@ -615,6 +616,22 @@ public final class Parser {
 
         if (check(LEFT_PAREN)) {
             return parseMethodDeclaration(name, modifiers, returnType, annotations, methodTypeParams);
+        }
+
+        if ("void".equals(returnType.name())) {
+            String suffix = returnType.arrayDimensions() > 0 ? "[]".repeat(returnType.arrayDimensions()) : "";
+            int spanStart = typeStart.column() - 1;
+            int spanEnd = nameTok.column() - 1 + name.length();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("field `" + name + "` cannot have type `void" + suffix + "`")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(typeStart.line(), SourceLines.lineAt(source, typeStart.line()))
+                    .highlight(spanStart, spanEnd)
+                    .label("`void" + suffix + "` is not a value carrying type")
+                    .note("fields hold values, but `void` describes a method that returns nothing")
+                    .build());
         }
 
         if (check(LEFT_BRACE)) {
@@ -1258,6 +1275,20 @@ public final class Parser {
             return parseLabeledStatement();
         }
 
+        if (check(VOID)) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`void` is not allowed at this position")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + 4)
+                    .label("`void` can only be a method return type")
+                    .note("local variables, fields, parameters, and array types cannot be `void`")
+                    .build());
+        }
+
         if (isLocalVariableDeclaration()) {
             return parseLocalVariableDeclaration();
         }
@@ -1605,7 +1636,7 @@ public final class Parser {
      * @return the break statement node
      */
     private @NotNull BreakStatement parseBreakStatement() {
-        int line = current().line();
+        Token start = current();
         expect(BREAK);
         String label = null;
         if (check(IDENTIFIER)) {
@@ -1613,7 +1644,7 @@ public final class Parser {
             advance();
         }
         expect(SEMICOLON);
-        return new BreakStatement(label, line);
+        return span(start, new BreakStatement(label, start.line()));
     }
 
     /**
@@ -1622,7 +1653,7 @@ public final class Parser {
      * @return the continue statement node
      */
     private @NotNull ContinueStatement parseContinueStatement() {
-        int line = current().line();
+        Token start = current();
         expect(CONTINUE);
         String label = null;
         if (check(IDENTIFIER)) {
@@ -1630,7 +1661,7 @@ public final class Parser {
             advance();
         }
         expect(SEMICOLON);
-        return new ContinueStatement(label, line);
+        return span(start, new ContinueStatement(label, start.line()));
     }
 
     /**
