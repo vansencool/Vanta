@@ -54,8 +54,20 @@ public final class CastCoercionEmitter {
                         else mvLit.visitLdcInsn(lv);
                         return;
                     }
-                    case "I", "B", "S", "C" -> {
+                    case "I" -> {
                         OpcodeUtils.pushInt(mvLit, (int) lv);
+                        return;
+                    }
+                    case "B" -> {
+                        OpcodeUtils.pushInt(mvLit, (byte) lv);
+                        return;
+                    }
+                    case "S" -> {
+                        OpcodeUtils.pushInt(mvLit, (short) lv);
+                        return;
+                    }
+                    case "C" -> {
+                        OpcodeUtils.pushInt(mvLit, (char) lv);
                         return;
                     }
                     case "F" -> {
@@ -183,12 +195,48 @@ public final class CastCoercionEmitter {
             case "JI" -> mv.visitInsn(Opcodes.L2I);
             case "JF" -> mv.visitInsn(Opcodes.L2F);
             case "JD" -> mv.visitInsn(Opcodes.L2D);
+            case "JB" -> {
+                mv.visitInsn(Opcodes.L2I);
+                mv.visitInsn(Opcodes.I2B);
+            }
+            case "JS" -> {
+                mv.visitInsn(Opcodes.L2I);
+                mv.visitInsn(Opcodes.I2S);
+            }
+            case "JC" -> {
+                mv.visitInsn(Opcodes.L2I);
+                mv.visitInsn(Opcodes.I2C);
+            }
             case "FI" -> mv.visitInsn(Opcodes.F2I);
             case "FJ" -> mv.visitInsn(Opcodes.F2L);
             case "FD" -> mv.visitInsn(Opcodes.F2D);
+            case "FB" -> {
+                mv.visitInsn(Opcodes.F2I);
+                mv.visitInsn(Opcodes.I2B);
+            }
+            case "FS" -> {
+                mv.visitInsn(Opcodes.F2I);
+                mv.visitInsn(Opcodes.I2S);
+            }
+            case "FC" -> {
+                mv.visitInsn(Opcodes.F2I);
+                mv.visitInsn(Opcodes.I2C);
+            }
             case "DI" -> mv.visitInsn(Opcodes.D2I);
             case "DJ" -> mv.visitInsn(Opcodes.D2L);
             case "DF" -> mv.visitInsn(Opcodes.D2F);
+            case "DB" -> {
+                mv.visitInsn(Opcodes.D2I);
+                mv.visitInsn(Opcodes.I2B);
+            }
+            case "DS" -> {
+                mv.visitInsn(Opcodes.D2I);
+                mv.visitInsn(Opcodes.I2S);
+            }
+            case "DC" -> {
+                mv.visitInsn(Opcodes.D2I);
+                mv.visitInsn(Opcodes.I2C);
+            }
         }
     }
 }

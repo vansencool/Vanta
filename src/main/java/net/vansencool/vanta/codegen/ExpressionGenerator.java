@@ -664,10 +664,18 @@ public final class ExpressionGenerator {
     }
 
     public boolean litHandledExpectedType(@NotNull LiteralExpression lit, @NotNull String paramDesc) {
-        boolean b = "J".equals(paramDesc) || "F".equals(paramDesc) || "D".equals(paramDesc);
-        if (lit.literalType() == TokenType.INT_LITERAL)
-            return b;
-        return lit.literalType() == TokenType.LONG_LITERAL && b;
+        if (lit.literalType() == TokenType.LONG_LITERAL)
+            return "F".equals(paramDesc) || "D".equals(paramDesc);
+        if (lit.literalType() != TokenType.INT_LITERAL) return false;
+        if ("J".equals(paramDesc) || "F".equals(paramDesc) || "D".equals(paramDesc)) return true;
+        Integer v = constantEvaluator.simpleIntValue(lit);
+        if (v == null) return false;
+        return switch (paramDesc) {
+            case "B" -> v >= Byte.MIN_VALUE && v <= Byte.MAX_VALUE;
+            case "S" -> v >= Short.MIN_VALUE && v <= Short.MAX_VALUE;
+            case "C" -> v >= Character.MIN_VALUE && v <= Character.MAX_VALUE;
+            default -> false;
+        };
     }
 
     public @NotNull String resolveFieldDescriptor(@NotNull String fieldName) {
