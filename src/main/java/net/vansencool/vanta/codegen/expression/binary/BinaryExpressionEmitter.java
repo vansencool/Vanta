@@ -214,6 +214,7 @@ public final class BinaryExpressionEmitter {
 
         StringBuilder recipe = new StringBuilder();
         StringBuilder descriptor = new StringBuilder("(");
+        boolean dynamic = false;
 
         for (Expression part : parts) {
             if (part instanceof LiteralExpression lit && lit.literalType() == TokenType.STRING_LITERAL) {
@@ -221,6 +222,7 @@ public final class BinaryExpressionEmitter {
             } else if (part instanceof LiteralExpression lit && lit.literalType() == TokenType.CHAR_LITERAL) {
                 recipe.append(LiteralParser.parseCharLiteral(lit.value()));
             } else {
+                dynamic = true;
                 exprGen.generate(part);
                 recipe.append('\1');
                 ResolvedType type = ctx.typeInferrer().infer(part);
@@ -231,6 +233,10 @@ public final class BinaryExpressionEmitter {
                     descriptor.append(LambdaEmitter.isValidDescriptor(d) ? d : "Ljava/lang/Object;");
                 }
             }
+        }
+        if (!dynamic) {
+            ctx.mv().visitLdcInsn(recipe.toString());
+            return;
         }
         descriptor.append(")Ljava/lang/String;");
         ctx.mv().visitInvokeDynamicInsn("makeConcatWithConstants", descriptor.toString(), exprGen.stringConcatHandle, recipe.toString());

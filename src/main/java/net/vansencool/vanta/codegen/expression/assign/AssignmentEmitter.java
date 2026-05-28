@@ -57,6 +57,9 @@ public final class AssignmentEmitter {
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value());
+                } else if (tryEmitIinc(assignment.operator(), local, assignment.value())) {
+                    ctx.mv().visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
+                    return;
                 } else {
                     ctx.mv().visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
                     exprGen.generate(assignment.value());
