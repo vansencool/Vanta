@@ -22,6 +22,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
+import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.TypeVariable;
@@ -119,10 +120,27 @@ public final class MethodArgumentEmitter {
         }
         Type arrayType = paramTypes[varargStart];
         Type elemType = arrayType.getElementType();
+        String elemInternalFromGeneric = null;
+        if (genericParams != null && varargStart < genericParams.length) {
+            java.lang.reflect.Type gp = genericParams[varargStart];
+            if (gp instanceof Class<?> cl && cl.isArray() && !cl.getComponentType().isPrimitive()) {
+                elemInternalFromGeneric = cl.getComponentType().getName().replace('.', '/');
+            } else if (gp instanceof GenericArrayType gat) {
+                java.lang.reflect.Type comp = gat.getGenericComponentType();
+                Map<String, ResolvedType> tvs = buildReceiverTypeVarMap();
+                ResolvedType resolved = GenericTypeResolver.resolve(comp, tvs);
+                if (resolved.internalName() != null && !"java/lang/Object".equals(resolved.internalName())) {
+                    elemInternalFromGeneric = resolved.internalName();
+                } else if (comp instanceof TypeVariable<?>) {
+                    elemInternalFromGeneric = inferVarargElementFromArgs(args, varargStart);
+                }
+            }
+        }
         int varargCount = args.size() - varargStart;
         OpcodeUtils.pushInt(ctx.mv(), varargCount);
         if (elemType.getSort() == Type.OBJECT) {
-            ctx.mv().visitTypeInsn(Opcodes.ANEWARRAY, elemType.getInternalName());
+            String internal = elemInternalFromGeneric != null ? elemInternalFromGeneric : elemType.getInternalName();
+            ctx.mv().visitTypeInsn(Opcodes.ANEWARRAY, internal);
         } else if (elemType.getSort() == Type.ARRAY) {
             ctx.mv().visitTypeInsn(Opcodes.ANEWARRAY, elemType.getDescriptor());
         } else {
@@ -204,6 +222,21 @@ public final class MethodArgumentEmitter {
                 ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, paramType.getInternalName());
             }
         }
+    }
+
+    /**
+     * @return common internal name of every vararg arg inferred type, or null when types disagree
+     */
+    private @Nullable String inferVarargElementFromArgs(@NotNull List<Expression> args, int varargStart) {
+        MethodContext ctx = exprGen.ctx();
+        String common = null;
+        for (int i = varargStart; i < args.size(); i++) {
+            ResolvedType t = ctx.typeInferrer().infer(args.get(i));
+            if (t == null || t.internalName() == null || t.isPrimitive()) return null;
+            if (common == null) common = t.internalName();
+            else if (!common.equals(t.internalName())) return null;
+        }
+        return common;
     }
 
     /**
