@@ -610,10 +610,31 @@ public final class Parser {
             return new MethodDeclaration("<init>", modifiers, new TypeNode("void", null, 0, returnType.line()), methodTypeParams, List.of(), body, null, annotations, false, returnType.line());
         }
 
+        Token nameTok = current();
         String name = expectIdentifier();
 
         if (check(LEFT_PAREN)) {
             return parseMethodDeclaration(name, modifiers, returnType, annotations, methodTypeParams);
+        }
+
+        if (check(LEFT_BRACE)) {
+            Token tok = current();
+            int insertCol = nameTok.column() - 1 + name.length();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("method `" + name + "` is missing its parameter list")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("expected `(` to start the parameter list before this `{`")
+                    .note("a method declaration must include parentheses, even for zero parameters: `" + name + "()`")
+                    .fix(new Fix(
+                            "insert empty parameter list `()`",
+                            null,
+                            List.of(Edit.insert(nameTok.line(), insertCol, "()", "insert `()` after `" + name + "`")),
+                            Applicability.MACHINE_APPLICABLE))
+                    .build());
         }
 
         return parseFieldDeclaration(name, modifiers, returnType, annotations);
@@ -1147,14 +1168,46 @@ public final class Parser {
      * @return the block statement
      */
     private @NotNull BlockStatement parseBlock() {
-        int line = current().line();
+        Token openBrace = current();
+        int line = openBrace.line();
         expect(LEFT_BRACE);
         List<Statement> stmts = new ArrayList<>();
         while (!check(RIGHT_BRACE)) {
+            if (check(EOF)) throwUnclosedBlock(openBrace);
             stmts.add(parseStatement());
         }
         expect(RIGHT_BRACE);
         return new BlockStatement(stmts, line);
+    }
+
+    /**
+     * Throws an unclosed block diagnostic anchored at the opening `{`.
+     */
+    private void throwUnclosedBlock(@NotNull Token openBrace) {
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unclosed block: missing `}`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openBrace.line(), SourceLines.lineAt(source, openBrace.line()))
+                .highlight(openBrace.column() - 1, openBrace.column())
+                .label("this `{` is never closed")
+                .note("every `{` must have a matching `}` later in the file")
+                .fix(new Fix(
+                        "add the missing `}`",
+                        null,
+                        List.of(Edit.insertLineAfter(lastSourceLine(), "}", "close the block here")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
+    }
+
+    /**
+     * @return one based last line number of the source text, used as the anchor when suggesting fixes that append at end of file
+     */
+    private int lastSourceLine() {
+        int count = 1;
+        for (int i = 0; i < source.length(); i++) if (source.charAt(i) == '\n') count++;
+        return count;
     }
 
     /**
@@ -2425,17 +2478,47 @@ public final class Parser {
      * @return the list of argument expressions
      */
     private @NotNull List<Expression> parseArguments() {
+        Token openParen = current();
         expect(LEFT_PAREN);
         List<Expression> args = new ArrayList<>();
         if (!check(RIGHT_PAREN)) {
+            if (check(RIGHT_BRACE) || check(SEMICOLON) || check(EOF)) throwUnclosedParen(openParen);
             args.add(parseExpression());
             while (check(COMMA)) {
                 advance();
+                if (check(RIGHT_BRACE) || check(SEMICOLON) || check(EOF)) throwUnclosedParen(openParen);
                 args.add(parseExpression());
             }
         }
+        if (!check(RIGHT_PAREN)) throwUnclosedParen(openParen);
         expect(RIGHT_PAREN);
         return args;
+    }
+
+    /**
+     * Throws an unclosed parenthesis diagnostic anchored at the opening `(`.
+     */
+    private void throwUnclosedParen(@NotNull Token openParen) {
+        Token here = current();
+        int prevPos = pos > 0 ? pos - 1 : 0;
+        Token prev = tokens[prevPos];
+        int insertLine = prev.line();
+        int insertCol = prev.column() - 1 + prev.value().length();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unclosed `(`: missing `)`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openParen.line(), SourceLines.lineAt(source, openParen.line()))
+                .highlight(openParen.column() - 1, openParen.column())
+                .label("this `(` was never closed")
+                .note("argument list runs from here to a matching `)` but the parser hit `" + (here.value().isEmpty() ? "end of file" : here.value()) + "` first")
+                .fix(new Fix(
+                        "insert `)` here",
+                        null,
+                        List.of(Edit.insert(insertLine, insertCol, ")", "close the paren")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
     }
 
     /**
