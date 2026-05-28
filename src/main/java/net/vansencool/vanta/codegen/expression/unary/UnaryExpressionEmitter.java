@@ -168,8 +168,8 @@ public final class UnaryExpressionEmitter {
                         ArithmeticOpcodes.emitDeltaPush(mv, "I", delta);
                         mv.visitInsn(ArithmeticOpcodes.addOrSub("I", delta));
                         mv.visitInsn(truncOp);
-                        mv.visitInsn(Opcodes.DUP);
                         mv.visitVarInsn(Opcodes.ISTORE, local.index());
+                        mv.visitVarInsn(Opcodes.ILOAD, local.index());
                     } else {
                         mv.visitVarInsn(Opcodes.ILOAD, local.index());
                         mv.visitInsn(Opcodes.DUP);

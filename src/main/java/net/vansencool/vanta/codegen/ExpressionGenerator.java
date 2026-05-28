@@ -37,6 +37,8 @@ import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
 import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
+import net.vansencool.vanta.parser.ast.statement.VariableDeclarationStatement;
+import net.vansencool.vanta.parser.ast.statement.VariableDeclarator;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
@@ -484,9 +486,40 @@ public final class ExpressionGenerator {
         return false;
     }
 
+    /**
+     * @return true when {@code local} is a final primitive with a compile time
+     * constant initializer and the constant was pushed in place of the ILOAD
+     */
+    private boolean tryInlineFinalLocal(@NotNull NameExpression ref, @NotNull LocalVariable local) {
+        if (!local.isFinal()) return false;
+        if (local.type().descriptor().length() != 1) return false;
+        if (!(local.declaration() instanceof VariableDeclarationStatement vds)) return false;
+        VariableDeclarator decl = null;
+        for (VariableDeclarator d : vds.declarators()) {
+            if (d.name().equals(ref.name())) {
+                decl = d;
+                break;
+            }
+        }
+        if (decl == null || decl.initializer() == null) return false;
+        String desc = local.type().descriptor();
+        if ("J".equals(desc)) {
+            Long lv = constantEvaluator.longValue(decl.initializer());
+            if (lv == null) return false;
+            ctx.mv().visitLdcInsn(lv);
+            return true;
+        }
+        if ("F".equals(desc) || "D".equals(desc)) return false;
+        Integer iv = constantEvaluator.intValue(decl.initializer());
+        if (iv == null) return false;
+        OpcodeUtils.pushInt(ctx.mv(), iv);
+        return true;
+    }
+
     private void generateName(@NotNull NameExpression name) {
         LocalVariable local = ctx.scope().resolve(name.name());
         if (local != null) {
+            if (tryInlineFinalLocal(name, local)) return;
             int opcode = OpcodeUtils.loadOpcode(local.type());
             ctx.mv().visitVarInsn(opcode, local.index());
         } else if (ctx.capturedFields() != null && ctx.capturedFields().containsKey(name.name())

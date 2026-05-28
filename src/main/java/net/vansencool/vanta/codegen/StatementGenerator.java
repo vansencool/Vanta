@@ -186,6 +186,13 @@ public final class StatementGenerator {
                 if (!TypeCompatibility.assignable(exprGen, resolvedType, initType, declarator.initializer())) {
                     throw new CompilationException(AssignmentTypeDiagnostic.build(ctx, exprGen, varDecl, declarator.initializer(), "variable '" + declarator.name() + "'", resolvedType, initType));
                 }
+                if (isFinalLocal && resolvedType.isPrimitive() && resolvedType.descriptor().length() == 1) {
+                    String d = resolvedType.descriptor();
+                    boolean inlinable = "J".equals(d)
+                            ? exprGen.constantEvaluator().longValue(declarator.initializer()) != null
+                            : !("F".equals(d) || "D".equals(d)) && exprGen.constantEvaluator().intValue(declarator.initializer()) != null;
+                    if (inlinable) continue;
+                }
                 exprGen.generate(declarator.initializer(), resolvedType);
                 boolean initIsNull = initType == ResolvedType.NULL;
                 boolean literalCoerced = declarator.initializer() instanceof LiteralExpression lit && exprGen.litHandledExpectedType(lit, resolvedType.descriptor());
