@@ -80,7 +80,7 @@ String source = """
     }
     """;
 
-Map<String, byte[]> classes = compiler.compile("Hello.java", source);
+Map<String, byte[]> classes = compiler.compile(source, "Hello.java");
 byte[] bytecode = classes.get("Hello");
 ```
 

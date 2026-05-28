@@ -9,7 +9,9 @@ import net.vansencool.vanta.codegen.MethodGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.lambda.capture.NonEffectivelyFinalCaptureDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.type.UnresolvedTypeDiagnostic;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclarator;
@@ -26,6 +28,7 @@ import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.scope.Scope;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.method.MethodSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.ClassWriter;
@@ -98,7 +101,7 @@ public final class ObjectCreationEmitter {
         MethodVisitor mv = ctx.mv();
         String declaredType = ctx.typeResolver().resolveInternalName(newExpr.type());
         if (newExpr.anonymousClassBody() == null && !isResolvableType(declaredType)) {
-            throw new CodeGenException("Cannot resolve type '" + declaredType.replace('/', '.') + "' in new expression", newExpr.line());
+            throw new CompilationException(UnresolvedTypeDiagnostic.build(ctx, newExpr, newExpr.type(), "new expression"));
         }
         boolean targetIsInterface = isTargetInterface(declaredType);
         String superInternal = targetIsInterface ? "java/lang/Object" : declaredType;
@@ -114,6 +117,11 @@ public final class ObjectCreationEmitter {
 
             LinkedHashMap<String, LocalVariable> anonCaptures = new LinkedHashMap<>();
             exprGen.expressionWalker().collectAnonCaptures(newExpr.anonymousClassBody(), anonCaptures);
+            for (LocalVariable cap : anonCaptures.values()) {
+                if (!ctx.isEffectivelyFinal(cap)) {
+                    throw new CompilationException(NonEffectivelyFinalCaptureDiagnostic.build(ctx, newExpr, cap, "anonymous class"));
+                }
+            }
 
             ClasspathManager cp = ctx.methodResolver().classpathManager();
             ClassWriter anonCw = createAnonClassWriter(cp);
@@ -172,8 +180,15 @@ public final class ObjectCreationEmitter {
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                 ctorDescBuilder.append(outerDesc);
             }
-            exprGen.methodArgumentEmitter().generateArgs(newExpr.arguments(), superCtorDesc);
             Type[] superParams = Type.getArgumentTypes(superCtorDesc);
+            List<String> superArgDescsForLookup = new ArrayList<>();
+            for (Expression a : newExpr.arguments()) {
+                ResolvedType t = ctx.typeInferrer().infer(a);
+                superArgDescsForLookup.add(t != null ? t.descriptor() : "Ljava/lang/Object;");
+            }
+            MethodSymbol superCtor = ctx.methodResolver().resolveConstructorSymbol(superInternal, superArgDescsForLookup);
+            boolean isVarargsCtor = superCtor != null && superCtor.isVarargs();
+            exprGen.methodArgumentEmitter().generateArgs(newExpr.arguments(), superCtorDesc, isVarargsCtor);
             for (Type pt : superParams) ctorDescBuilder.append(pt.getDescriptor());
             for (LocalVariable cap : anonCaptures.values()) {
                 if (cap.index() < 0) {
@@ -289,7 +304,8 @@ public final class ObjectCreationEmitter {
                 for (Parameter p : methodDecl.parameters()) paramTypes.add(p.type());
                 String desc = ctx.typeResolver().methodDescriptor(paramTypes, methodDecl.returnType());
                 boolean isStatic = (methodDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
-                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic);
+                boolean isVarargs = !methodDecl.parameters().isEmpty() && methodDecl.parameters().get(methodDecl.parameters().size() - 1).isVarargs();
+                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic, isVarargs);
                 String baseKey = methodDecl.name() + ":" + methodDecl.parameters().size();
                 if (!selfMethods.containsKey(baseKey)) selfMethods.put(baseKey, info);
                 else selfMethods.put(baseKey + "#" + desc, info);

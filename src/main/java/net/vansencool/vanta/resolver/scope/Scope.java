@@ -1,11 +1,14 @@
 package net.vansencool.vanta.resolver.scope;
 
+import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Represents a lexical scope that maps variable names to their resolved types and local indices.
@@ -36,9 +39,21 @@ public final class Scope {
      * @return the local variable
      */
     public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type) {
+        return declare(name, type, false, null);
+    }
+
+    public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal) {
+        return declare(name, type, isFinal, null);
+    }
+
+    public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, @Nullable AstNode declaration) {
+        return declare(name, type, isFinal, false, declaration);
+    }
+
+    public @NotNull LocalVariable declare(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, boolean hasInitializer, @Nullable AstNode declaration) {
         int index = nextLocalIndex;
         nextLocalIndex += type.stackSize();
-        LocalVariable var = new LocalVariable(name, type, index);
+        LocalVariable var = new LocalVariable(name, type, index, isFinal, hasInitializer, declaration);
         variables.put(name, var);
         return var;
     }
@@ -54,6 +69,13 @@ public final class Scope {
         if (var != null) return var;
         if (parent != null) return parent.resolve(name);
         return null;
+    }
+
+    /**
+     * @return the variable declared in this scope only (no parent walk), or null when none
+     */
+    public @Nullable LocalVariable resolveInCurrent(@NotNull String name) {
+        return variables.get(name);
     }
 
     /**
@@ -79,5 +101,14 @@ public final class Scope {
      */
     public void removeVariablesFrom(int fromSlot) {
         variables.entrySet().removeIf(e -> e.getValue().index() >= fromSlot);
+    }
+
+    /**
+     * @return every variable name declared in this scope and its enclosing scopes
+     */
+    public @NotNull Set<String> allNames() {
+        Set<String> out = new LinkedHashSet<>(variables.keySet());
+        if (parent != null) out.addAll(parent.allNames());
+        return out;
     }
 }

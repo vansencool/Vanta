@@ -2,11 +2,10 @@ package net.vansencool.vanta;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.ClassGenerator;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
-import net.vansencool.vanta.diagnostic.Diagnostic;
-import net.vansencool.vanta.diagnostic.Severity;
-import net.vansencool.vanta.diagnostic.util.SourceLines;
+import net.vansencool.vanta.codegen.diagnostic.imp.ImportValidator;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.exception.CompilationException;
+import net.vansencool.vanta.exception.MultiCompilationException;
 import net.vansencool.vanta.lexer.Lexer;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.parser.Parser;
@@ -22,7 +21,6 @@ import org.jetbrains.annotations.Nullable;
 import java.net.URLClassLoader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -196,50 +194,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * keyed by its internal name.
      */
     public @NotNull Map<String, byte[]> compile(@NotNull String source, @Nullable String sourceFile) {
-        return compile(parse(source, sourceFile), source, sourceFile);
-    }
-
-    /**
-     * Compiles an already parsed {@link CompilationUnit}. Use this when the AST
-     * has been produced separately (for example by {@link #parseAll}) so the
-     * source is not re-parsed.
-     *
-     * @param source the original source text, retained for diagnostic rendering
-     */
-    public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile) {
-        try {
-            TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
-            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile);
-
-            Map<String, byte[]> result = new HashMap<>();
-
-            for (AstNode typeDecl : cu.typeDeclarations()) {
-                if (typeDecl instanceof ClassDeclaration classDecl) {
-                    String outerInternalName = toInternalName(classDecl.name(), cu.packageName());
-                    registerInnerClasses(typeResolver, classDecl, outerInternalName);
-                    Map<String, byte[]> innerBytecodes = classGenerator.generateInnerClasses(classDecl, cu.packageName());
-                    byte[] bytecode = classGenerator.generate(classDecl, cu.packageName());
-                    result.put(outerInternalName, bytecode);
-                    result.putAll(innerBytecodes);
-                    result.putAll(classGenerator.getAndClearAnonClassBytecodes());
-                }
-            }
-
-            return result;
-        } catch (CodeGenException e) {
-            throw new CompilationException(Diagnostic.builder()
-                    .severity(Severity.ERROR)
-                    .title(e.rawMessage())
-                    .sourceFile(sourceFile)
-                    .at(e.line(), SourceLines.lineAt(source, e.line()))
-                    .build());
-        } catch (CompilationException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            System.err.println("[Vanta] Unexpected failure compiling " + sourceFile + ": " + e);
-            e.printStackTrace(System.err);
-            throw e;
-        }
+        return compile(parse(source, sourceFile), source, sourceFile, null);
     }
 
     /**
@@ -252,13 +207,53 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     public @NotNull Map<String, byte[]> compileAll(@NotNull Map<String, String> sources) {
         Map<String, CompilationUnit> parsed = parseAll(sources);
         registerSources(parsed);
+        DiagnosticReport report = new DiagnosticReport();
         Map<String, byte[]> result = new HashMap<>();
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             String path = entry.getKey();
             String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-            result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
+            try {
+                result.putAll(compile(parsed.get(path), entry.getValue(), fileName, report));
+            } catch (CompilationException e) {
+                report.report(fileName, null, e.diagnostic());
+            }
         }
+        if (report.hasErrors()) throw new MultiCompilationException(report);
         return result;
+    }
+
+    /**
+     * Compiles a single parsed unit. When {@code report} is non null,
+     * recoverable errors inside individual methods are appended to the report
+     * and emission continues with stub bodies; otherwise the first failure
+     * throws.
+     */
+    public @NotNull Map<String, byte[]> compile(@NotNull CompilationUnit cu, @NotNull String source, @Nullable String sourceFile, @Nullable DiagnosticReport report) {
+        try {
+            ImportValidator.validate(classpathManager, source, sourceFile, cu);
+            TypeResolver typeResolver = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
+            ClassGenerator classGenerator = new ClassGenerator(classpathManager, typeResolver, sourceFile, source, cu.spanTable());
+            classGenerator.report(report);
+            Map<String, byte[]> result = new HashMap<>();
+            for (AstNode typeDecl : cu.typeDeclarations()) {
+                if (typeDecl instanceof ClassDeclaration classDecl) {
+                    String outerInternalName = toInternalName(classDecl.name(), cu.packageName());
+                    registerInnerClasses(typeResolver, classDecl, outerInternalName);
+                    Map<String, byte[]> innerBytecodes = classGenerator.generateInnerClasses(classDecl, cu.packageName());
+                    byte[] bytecode = classGenerator.generate(classDecl, cu.packageName());
+                    result.put(outerInternalName, bytecode);
+                    result.putAll(innerBytecodes);
+                    result.putAll(classGenerator.getAndClearAnonClassBytecodes());
+                }
+            }
+            return result;
+        } catch (CompilationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            System.err.println("[Vanta] Unexpected failure compiling " + sourceFile + ": " + e);
+            e.printStackTrace(System.err);
+            throw e;
+        }
     }
 
     /**
@@ -270,16 +265,22 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      */
     public void registerSources(@NotNull Map<String, CompilationUnit> parsed) {
         TypeRegistry registry = classpathManager.typeRegistry();
+        Map<String, TypeResolver> resolvers = new HashMap<>();
         for (Map.Entry<String, CompilationUnit> e : parsed.entrySet()) {
             CompilationUnit cu = e.getValue();
             TypeResolver tr = new TypeResolver(classpathManager, cu.imports(), cu.packageName());
+            resolvers.put(e.getKey(), tr);
+            registry.register(e.getKey(), cu, tr);
+        }
+        for (Map.Entry<String, CompilationUnit> e : parsed.entrySet()) {
+            CompilationUnit cu = e.getValue();
+            TypeResolver tr = resolvers.get(e.getKey());
             for (AstNode typeDecl : cu.typeDeclarations()) {
                 if (typeDecl instanceof ClassDeclaration cd) {
                     String outerInternalName = toInternalName(cd.name(), cu.packageName());
                     registerInnerClasses(tr, cd, outerInternalName);
                 }
             }
-            registry.register(e.getKey(), cu, tr);
         }
     }
 
@@ -295,7 +296,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * @return map from class internal name to bytecode bytes
      */
     public @NotNull Map<String, byte[]> compileAllParallel(@NotNull Map<String, String> sources, @NotNull ParallelMode mode) {
-        if (mode.isSmart()) return compileAllSmart(sources, mode.maxThreads(), mode.heavyPercentile());
         int fileWorkers = Math.min(mode.fileWorkers(), sources.size());
         if (sources.size() <= 1 || fileWorkers <= 1) {
             MethodParallelism.current(mode.methodWorkers());
@@ -321,7 +321,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
                     String path = entry.getKey();
                     String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
                     try {
-                        result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
+                        result.putAll(compile(parsed.get(path), entry.getValue(), fileName, null));
                     } catch (RuntimeException e) {
                         firstFailure.compareAndSet(null, e);
                     }
@@ -338,70 +338,6 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         } finally {
             MethodParallelism.clear();
         }
-    }
-
-    /**
-     * Smart-mode compilation. Uses work-stealing via one-task-per-file dispatch.
-     * Files whose source length is dramatically larger than the median (outliers)
-     * receive dedicated method workers; everything else runs pure file-parallel.
-     * File worker count is clamped to min(maxThreads, 8) because past 8 workers
-     * gains are noise and queue contention rises.
-     */
-    private @NotNull Map<String, byte[]> compileAllSmart(@NotNull Map<String, String> sources, int maxThreads, int heavyPercentile) {
-        if (sources.size() <= 1) return compileAll(sources);
-        int fileWorkers = Math.min(Math.min(maxThreads, 8), sources.size());
-        if (fileWorkers <= 1) return compileAll(sources);
-        ExecutorService pool = classpathManager.sharedFilePool(fileWorkers);
-        Map<String, CompilationUnit> parsed = parseAllParallel(sources, pool);
-        registerSources(parsed);
-        int[] lengths = sources.values().stream().mapToInt(String::length).sorted().toArray();
-        int median = lengths[lengths.length / 2];
-        int p95 = lengths[Math.min(lengths.length - 1, (int) (lengths.length * 0.95))];
-        boolean worthHeavy = p95 >= median * 4;
-        int threshold = worthHeavy ? lengths[(int) (lengths.length * heavyPercentile / 100.0)] : Integer.MAX_VALUE;
-        Set<String> heavyKeys;
-        int methodWorkersForHeavy;
-        if (worthHeavy) {
-            heavyKeys = new HashSet<>();
-            for (Map.Entry<String, String> e : sources.entrySet()) {
-                if (e.getValue().length() >= threshold) heavyKeys.add(e.getKey());
-            }
-            int spare = Math.max(0, maxThreads - fileWorkers);
-            methodWorkersForHeavy = heavyKeys.isEmpty() ? 1 : Math.max(2, 1 + spare / heavyKeys.size());
-        } else {
-            heavyKeys = Collections.emptySet();
-            methodWorkersForHeavy = 1;
-        }
-        Map<String, byte[]> result = new ConcurrentHashMap<>();
-        AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
-        List<Map.Entry<String, String>> ordered = new ArrayList<>(sources.entrySet());
-        ordered.sort(new LongestFirst());
-        List<Future<?>> futures = new ArrayList<>(sources.size());
-        for (Map.Entry<String, String> entry : ordered) {
-            int mw = heavyKeys.contains(entry.getKey()) ? methodWorkersForHeavy : 1;
-            futures.add(pool.submit(() -> {
-                if (firstFailure.get() != null) return;
-                String path = entry.getKey();
-                String fileName = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-                if (mw > 1) MethodParallelism.current(mw);
-                try {
-                    result.putAll(compile(parsed.get(path), entry.getValue(), fileName));
-                } catch (Throwable e) {
-                    System.err.println("DBG fail " + path + ": " + e);
-                    if (e instanceof RuntimeException re) firstFailure.compareAndSet(null, re);
-                } finally {
-                    if (mw > 1) MethodParallelism.clear();
-                }
-            }));
-        }
-        for (Future<?> f : futures) {
-            try {
-                f.get();
-            } catch (Exception ignored) {
-            }
-        }
-        if (firstFailure.get() != null) throw firstFailure.get();
-        return result;
     }
 
     /**

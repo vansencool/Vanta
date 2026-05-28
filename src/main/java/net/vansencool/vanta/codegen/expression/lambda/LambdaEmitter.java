@@ -7,8 +7,19 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.classes.visitor.RecordingMethodVisitor;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.lambda.BoundMethodReferenceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.ConstructorReferenceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaNoSamDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.LambdaTargetDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceNoSamDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceReceiverDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceReceiverNotLoadableDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MethodReferenceTargetDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.MissingFunctionalInterfaceDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.lambda.capture.NonEffectivelyFinalCaptureDiagnostic;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
@@ -95,16 +106,16 @@ public final class LambdaEmitter {
     public void emitMethodReference(@NotNull MethodReferenceExpression ref, @Nullable ResolvedType targetType) {
         MethodContext ctx = exprGen.ctx();
         if (targetType == null || targetType.internalName() == null) {
-            throw new CodeGenException("Cannot determine functional interface for method reference", ref.line());
+            throw new CompilationException(MethodReferenceTargetDiagnostic.build(ctx, ref));
         }
         ClassWriter cw = ctx.classWriter();
-        if (cw == null) throw new CodeGenException("Method references require class level context", ref.line());
+        if (cw == null) throw new IllegalStateException("internal compiler error: method reference emission requires a class writer on the method context, none present at line " + ref.line());
         TypeSymbol ifaceSym = registry().lookup(targetType.internalName());
         if (ifaceSym == null)
-            throw new CodeGenException("Cannot load functional interface: " + targetType.internalName(), ref.line());
+            throw new CompilationException(MissingFunctionalInterfaceDiagnostic.build(ctx, ref, targetType.internalName(), "method reference"));
         MethodSymbol samSym = findSam(ifaceSym);
         if (samSym == null)
-            throw new CodeGenException("No abstract method in: " + targetType.internalName(), ref.line());
+            throw new CompilationException(MethodReferenceNoSamDiagnostic.build(ctx, ref, ifaceSym));
         String samName = samSym.name();
         String samDescriptor = samSym.descriptor();
         int samArity = samSym.parameterTypes().size();
@@ -121,7 +132,8 @@ public final class LambdaEmitter {
         }
         LocalVariable receiverLocal = refTargetName != null ? ctx.scope().resolve(refTargetName) : null;
         boolean refTargetIsType = receiverLocal == null && refTargetType != null && refTargetType.internalName() != null
-                && !"I".equals(refTargetType.descriptor());
+                && !"I".equals(refTargetType.descriptor())
+                && ctx.methodResolver().classpathManager().exists(refTargetType.internalName());
         TypeSymbol refTargetSym = refTargetIsType ? registry().lookup(refTargetType.internalName()) : null;
 
         MethodSymbol targetSym = null;
@@ -143,7 +155,7 @@ public final class LambdaEmitter {
                 break;
             }
             if (targetSym == null)
-                throw new CodeGenException("No matching constructor for " + refTargetType.internalName(), ref.line());
+                throw new CompilationException(ConstructorReferenceDiagnostic.build(ctx, ref, refTargetSym, samArity));
         } else if (isCtorRef && refTargetIsType) {
             fallbackIsCtor = true;
             fallbackOwnerInternal = refTargetType.internalName();
@@ -166,8 +178,7 @@ public final class LambdaEmitter {
             } else if (instMatch != null) {
                 targetSym = instMatch;
                 isUnboundInstanceRef = true;
-            } else
-                throw new CodeGenException("No matching method " + ref.methodName() + " in " + refTargetType.internalName(), ref.line());
+            } else throw new CompilationException(MethodReferenceDiagnostic.build(ctx, ref, refTargetSym, samArity));
         } else if (refTargetIsType) {
             fallbackOwnerInternal = refTargetType.internalName();
             fallbackIsStatic = true;
@@ -185,16 +196,16 @@ public final class LambdaEmitter {
         } else {
             ResolvedType recvType = ctx.typeInferrer().infer(ref.target());
             if (recvType == null || recvType.internalName() == null)
-                throw new CodeGenException("Cannot resolve method reference receiver", ref.line());
+                throw new CompilationException(MethodReferenceReceiverDiagnostic.build(ctx, ref));
             TypeSymbol recvSym = registry().lookup(recvType.internalName());
-            if (recvSym == null) throw new CodeGenException("Cannot load: " + recvType.internalName(), ref.line());
+            if (recvSym == null) throw new CompilationException(MethodReferenceReceiverNotLoadableDiagnostic.build(ctx, ref, recvType.internalName()));
             for (MethodSymbol m : allMethodsIncludingSupers(recvSym)) {
                 if (m.name().equals(ref.methodName()) && m.parameterTypes().size() == samArity) {
                     targetSym = m;
                     break;
                 }
             }
-            if (targetSym == null) throw new CodeGenException("No matching method " + ref.methodName(), ref.line());
+            if (targetSym == null) throw new CompilationException(BoundMethodReferenceDiagnostic.build(ctx, ref, recvSym, samArity));
         }
 
         Handle implHandle;
@@ -256,19 +267,19 @@ public final class LambdaEmitter {
         MethodContext ctx = exprGen.ctx();
         MethodVisitor mv = ctx.mv();
         ClassWriter cw = ctx.classWriter();
-        if (cw == null) throw new CodeGenException("Lambda expressions require class level context", lambda.line());
+        if (cw == null) throw new IllegalStateException("internal compiler error: lambda emission requires a class writer on the method context, none present at line " + lambda.line());
 
         if (targetType == null || targetType.internalName() == null)
-            throw new CodeGenException("Cannot determine target functional interface for lambda", lambda.line());
+            throw new CompilationException(LambdaTargetDiagnostic.build(ctx, lambda));
 
         String interfaceInternal = targetType.internalName();
         TypeSymbol ifaceSym = registry().lookup(interfaceInternal);
         if (ifaceSym == null)
-            throw new CodeGenException("Cannot load functional interface: " + interfaceInternal, lambda.line());
+            throw new CompilationException(MissingFunctionalInterfaceDiagnostic.build(ctx, lambda, interfaceInternal, "lambda"));
 
         MethodSymbol samSym = findSam(ifaceSym);
         if (samSym == null)
-            throw new CodeGenException("No abstract method found in: " + interfaceInternal, lambda.line());
+            throw new CompilationException(LambdaNoSamDiagnostic.build(ctx, lambda, ifaceSym));
 
         String samName = samSym.name();
         String samDescriptor = samSym.descriptor();
@@ -287,6 +298,11 @@ public final class LambdaEmitter {
         boolean hasImplicitThis = !ctx.isStatic() || ctx.scope().resolve("this") != null;
         boolean needsThis = hasImplicitThis && lambdaReferencesThis(lambda, lambdaParamNames);
         collectLambdaCaptures(lambda, lambdaParamNames, captures);
+        for (LocalVariable cap : captures.values()) {
+            if (!ctx.isEffectivelyFinal(cap)) {
+                throw new CompilationException(NonEffectivelyFinalCaptureDiagnostic.build(ctx, lambda, cap, "lambda"));
+            }
+        }
 
         List<ResolvedType> lambdaParamTypes = new ArrayList<>();
         for (int i = 0; i < lambda.parameters().size(); i++) {

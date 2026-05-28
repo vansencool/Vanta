@@ -3,7 +3,9 @@ package net.vansencool.vanta.codegen.expression.call;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.method.MethodResolutionDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.method.SelfMethodDiagnostic;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
@@ -164,9 +166,7 @@ public final class MethodCallEmitter {
                 mv.visitTypeInsn(Opcodes.CHECKCAST, arrayDesc);
                 return true;
             }
-            String targetDesc = targetTypeFb == null ? "<unknown>" : targetTypeFb.descriptor();
-            throw new CodeGenException("Cannot resolve method " + call.methodName() + "/" + call.arguments().size()
-                    + " on receiver of type " + targetDesc + " (in " + ctx.classInternalName() + ")", call.line());
+            throw new CompilationException(MethodResolutionDiagnostic.build(ctx, call, targetTypeFb));
         }
 
         SelfMethodInfo selfInfo = exprGen.methodResolutionHelper().resolveSelfMethod(call);
@@ -187,12 +187,14 @@ public final class MethodCallEmitter {
             int savedDiscard = exprGen.discardDepth();
             exprGen.discardDepth(0);
             try {
-                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor());
+                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor(), selfInfo.isVarargs());
             } finally {
                 exprGen.discardDepth(savedDiscard);
             }
             int opcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
             mv.visitMethodInsn(opcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), false);
+            MethodResolver.ResolvedMethod resolvedSelf = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(ctx.classInternalName(), call.methodName(), call.arguments());
+            if (resolvedSelf != null) exprGen.emitGenericReturnCheckcast(call, resolvedSelf);
             return !selfInfo.descriptor().endsWith(")V");
         }
         if (ctx.enclosingOuterInternal() != null || ctx.enclosingStaticOuter() != null) {
@@ -207,7 +209,7 @@ public final class MethodCallEmitter {
             selfResolved = exprGen.methodResolutionHelper().resolveInheritedProtectedMethod(ctx.superInternalName(), call.methodName(), call.arguments().size());
         }
         if (selfResolved != null && selfResolved.opcode() == Opcodes.INVOKESTATIC) {
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor());
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
             String staticOwner = selfResolved.owner();
             if (staticOwner.equals(ctx.superInternalName())) staticOwner = ctx.classInternalName();
             mv.visitMethodInsn(selfResolved.opcode(), staticOwner, selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
@@ -215,11 +217,17 @@ public final class MethodCallEmitter {
         }
         if (selfResolved != null) {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor());
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
             mv.visitMethodInsn(selfResolved.opcode(), selfResolved.owner(), selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
             return !selfResolved.descriptor().endsWith(")V");
         }
-        throw new CodeGenException("Cannot resolve self method " + call.methodName() + "/" + call.arguments().size()
-                + " on " + ctx.classInternalName(), call.line());
+        throw new CompilationException(SelfMethodDiagnostic.build(ctx, call));
+    }
+
+    /**
+     * @return true when the resolved method's underlying symbol is declared as varargs
+     */
+    private static boolean isVarargs(@NotNull MethodResolver.ResolvedMethod resolved) {
+        return resolved.symbol() != null && resolved.symbol().isVarargs();
     }
 }

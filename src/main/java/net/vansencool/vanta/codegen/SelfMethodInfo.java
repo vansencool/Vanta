@@ -7,5 +7,12 @@ import org.jetbrains.annotations.NotNull;
  * used to resolve self-calls without reflection.
  */
 public record SelfMethodInfo(@NotNull String owner, @NotNull String name, @NotNull String descriptor,
-                             boolean isStatic) {
+                             boolean isStatic, boolean isVarargs) {
+
+    /**
+     * Convenience for callers that do not track varargs (treated as non-varargs).
+     */
+    public SelfMethodInfo(@NotNull String owner, @NotNull String name, @NotNull String descriptor, boolean isStatic) {
+        this(owner, name, descriptor, isStatic, false);
+    }
 }

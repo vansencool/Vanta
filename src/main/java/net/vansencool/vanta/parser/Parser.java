@@ -2,6 +2,9 @@ package net.vansencool.vanta.parser;
 
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.fix.Applicability;
+import net.vansencool.vanta.diagnostic.fix.Edit;
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import net.vansencool.vanta.diagnostic.util.SourceLines;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.Token;
@@ -41,6 +44,8 @@ import net.vansencool.vanta.parser.ast.expression.SwitchExpression;
 import net.vansencool.vanta.parser.ast.expression.TernaryExpression;
 import net.vansencool.vanta.parser.ast.expression.ThisExpression;
 import net.vansencool.vanta.parser.ast.expression.UnaryExpression;
+import net.vansencool.vanta.parser.ast.span.Span;
+import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.statement.AssertStatement;
 import net.vansencool.vanta.parser.ast.statement.BlockStatement;
 import net.vansencool.vanta.parser.ast.statement.BreakStatement;
@@ -88,6 +93,7 @@ public final class Parser {
     private final @NotNull String source;
     private final @Nullable String sourceFile;
     private final @NotNull List<Comment> sourceComments;
+    private final @NotNull SpanTable spanTable = new SpanTable();
     private @NotNull Token @NotNull [] tokens;
     private int tokenCount;
     private int pos;
@@ -152,7 +158,7 @@ public final class Parser {
             typeDecls.add(parseTypeDeclaration());
         }
         CommentTable commentTable = buildCommentTable(typeDecls);
-        return new CompilationUnit(packageName, imports, typeDecls, commentTable, startLine);
+        return new CompilationUnit(packageName, imports, typeDecls, commentTable, spanTable, startLine);
     }
 
     /**
@@ -220,7 +226,7 @@ public final class Parser {
      * @return the import declaration node
      */
     private @NotNull ImportDeclaration parseImportDeclaration() {
-        int line = current().line();
+        Token start = current();
         expect(IMPORT);
         boolean isStatic = false;
         if (check(STATIC)) {
@@ -236,7 +242,7 @@ public final class Parser {
             isWildcard = true;
         }
         expect(SEMICOLON);
-        return new ImportDeclaration(name, isStatic, isWildcard, line);
+        return span(start, new ImportDeclaration(name, isStatic, isWildcard, start.line()));
     }
 
     /**
@@ -593,6 +599,7 @@ public final class Parser {
             }
         }
 
+        Token typeStart = current();
         TypeNode returnType = parseType();
 
         if (returnType.name().equals(enclosingName) && check(LEFT_PAREN)) {
@@ -604,10 +611,47 @@ public final class Parser {
             return new MethodDeclaration("<init>", modifiers, new TypeNode("void", null, 0, returnType.line()), methodTypeParams, List.of(), body, null, annotations, false, returnType.line());
         }
 
+        Token nameTok = current();
         String name = expectIdentifier();
 
         if (check(LEFT_PAREN)) {
             return parseMethodDeclaration(name, modifiers, returnType, annotations, methodTypeParams);
+        }
+
+        if ("void".equals(returnType.name())) {
+            String suffix = returnType.arrayDimensions() > 0 ? "[]".repeat(returnType.arrayDimensions()) : "";
+            int spanStart = typeStart.column() - 1;
+            int spanEnd = nameTok.column() - 1 + name.length();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("field `" + name + "` cannot have type `void" + suffix + "`")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(typeStart.line(), SourceLines.lineAt(source, typeStart.line()))
+                    .highlight(spanStart, spanEnd)
+                    .label("`void" + suffix + "` is not a value carrying type")
+                    .note("fields hold values, but `void` describes a method that returns nothing")
+                    .build());
+        }
+
+        if (check(LEFT_BRACE)) {
+            Token tok = current();
+            int insertCol = nameTok.column() - 1 + name.length();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("method `" + name + "` is missing its parameter list")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("expected `(` to start the parameter list before this `{`")
+                    .note("a method declaration must include parentheses, even for zero parameters: `" + name + "()`")
+                    .fix(new Fix(
+                            "insert empty parameter list `()`",
+                            null,
+                            List.of(Edit.insert(nameTok.line(), insertCol, "()", "insert `()` after `" + name + "`")),
+                            Applicability.MACHINE_APPLICABLE))
+                    .build());
         }
 
         return parseFieldDeclaration(name, modifiers, returnType, annotations);
@@ -860,7 +904,7 @@ public final class Parser {
      * @return the type node
      */
     private @NotNull TypeNode parseType() {
-        int line = current().line();
+        Token start = current();
         parseAnnotations();
         String name = parseTypeName();
         List<TypeNode> typeArgs = null;
@@ -878,7 +922,12 @@ public final class Parser {
                 break;
             }
         }
-        return new TypeNode(name, typeArgs, dims, line);
+        TypeNode node = new TypeNode(name, typeArgs, dims, start.line());
+        Token end = previous();
+        int endLine = end.line();
+        int endColumn = end.value().isEmpty() ? end.column() : end.column() + end.value().length() - 1;
+        spanTable.record(node, new Span(start.line(), start.column(), endLine, endColumn));
+        return node;
     }
 
     /**
@@ -932,15 +981,14 @@ public final class Parser {
             advance();
             if (check(EXTENDS)) {
                 advance();
-                TypeNode bound = parseType();
-                return new TypeNode("? extends " + bound, null, 0, line);
+                return parseType();
             }
             if (check(SUPER)) {
                 advance();
-                TypeNode bound = parseType();
-                return new TypeNode("? super " + bound, null, 0, line);
+                parseType();
+                return new TypeNode("java/lang/Object", null, 0, line);
             }
-            return new TypeNode("?", null, 0, line);
+            return new TypeNode("java/lang/Object", null, 0, line);
         }
         return parseType();
     }
@@ -969,8 +1017,10 @@ public final class Parser {
         String name = parseQualifiedName();
         Map<String, Expression> attrs = null;
         if (check(LEFT_PAREN)) {
+            Token openParen = current();
             advance();
             if (!check(RIGHT_PAREN)) {
+                if (check(CLASS) || check(INTERFACE) || check(ENUM) || check(RECORD) || check(AT) || check(EOF)) throwUnclosedAnnotationArg(name, openParen);
                 attrs = new LinkedHashMap<>();
                 if (check(IDENTIFIER) && peek().type() == ASSIGN) {
                     do {
@@ -985,6 +1035,7 @@ public final class Parser {
                     attrs.put("value", value);
                 }
             }
+            if (!check(RIGHT_PAREN)) throwUnclosedAnnotationArg(name, openParen);
             expect(RIGHT_PAREN);
         }
         return new AnnotationNode(name, attrs, line);
@@ -1012,46 +1063,57 @@ public final class Parser {
         while (true) {
             switch (current().type()) {
                 case PUBLIC -> {
+                    if ((mods & 0x0001) != 0) throwDuplicateModifier("public");
                     mods |= 0x0001;
                     advance();
                 }
                 case PRIVATE -> {
+                    if ((mods & 0x0002) != 0) throwDuplicateModifier("private");
                     mods |= 0x0002;
                     advance();
                 }
                 case PROTECTED -> {
+                    if ((mods & 0x0004) != 0) throwDuplicateModifier("protected");
                     mods |= 0x0004;
                     advance();
                 }
                 case STATIC -> {
+                    if ((mods & 0x0008) != 0) throwDuplicateModifier("static");
                     mods |= 0x0008;
                     advance();
                 }
                 case FINAL -> {
+                    if ((mods & 0x0010) != 0) throwDuplicateModifier("final");
                     mods |= 0x0010;
                     advance();
                 }
                 case ABSTRACT -> {
+                    if ((mods & 0x0400) != 0) throwDuplicateModifier("abstract");
                     mods |= 0x0400;
                     advance();
                 }
                 case NATIVE -> {
+                    if ((mods & 0x0100) != 0) throwDuplicateModifier("native");
                     mods |= 0x0100;
                     advance();
                 }
                 case SYNCHRONIZED -> {
+                    if ((mods & 0x0020) != 0) throwDuplicateModifier("synchronized");
                     mods |= 0x0020;
                     advance();
                 }
                 case TRANSIENT -> {
+                    if ((mods & 0x0080) != 0) throwDuplicateModifier("transient");
                     mods |= 0x0080;
                     advance();
                 }
                 case VOLATILE -> {
+                    if ((mods & 0x0040) != 0) throwDuplicateModifier("volatile");
                     mods |= 0x0040;
                     advance();
                 }
                 case STRICTFP -> {
+                    if ((mods & 0x0800) != 0) throwDuplicateModifier("strictfp");
                     mods |= 0x0800;
                     advance();
                 }
@@ -1059,6 +1121,64 @@ public final class Parser {
                     return mods;
                 }
             }
+            rejectConflictingModifiers(mods);
+        }
+    }
+
+    /**
+     * Throws a {@link CompilationException} flagging the current modifier
+     * token as a duplicate.
+     */
+    private void throwDuplicateModifier(@NotNull String name) {
+        Token tok = current();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("duplicate modifier `" + name + "`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                .highlight(tok.column() - 1, tok.column() - 1 + name.length())
+                .label("`" + name + "` already appears on this declaration")
+                .note("each access or behavior modifier may appear at most once on a single declaration")
+                .fix(new Fix(
+                        "remove the duplicate `" + name + "`",
+                        null,
+                        List.of(Edit.delete(tok.line(), tok.column() - 1, tok.column() - 1 + name.length() + 1, "duplicate `" + name + "`")),
+                        Applicability.MACHINE_APPLICABLE))
+                .build());
+    }
+
+    /**
+     * Throws when two modifiers are mutually exclusive (e.g. {@code public}
+     * with {@code private}, or {@code abstract} with {@code final}).
+     */
+    private void rejectConflictingModifiers(int mods) {
+        int access = mods & 0x0007;
+        if (Integer.bitCount(access) > 1) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("conflicting access modifiers")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("at most one of `public`, `private`, `protected` may appear on a declaration")
+                    .note("Java allows only a single access modifier per declaration")
+                    .build());
+        }
+        if ((mods & 0x0010) != 0 && (mods & 0x0400) != 0) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`abstract` and `final` cannot be combined")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column())
+                    .label("an abstract member cannot be final")
+                    .note("`abstract` requires that a subclass override the member; `final` forbids overriding")
+                    .build());
         }
     }
 
@@ -1068,14 +1188,46 @@ public final class Parser {
      * @return the block statement
      */
     private @NotNull BlockStatement parseBlock() {
-        int line = current().line();
+        Token openBrace = current();
+        int line = openBrace.line();
         expect(LEFT_BRACE);
         List<Statement> stmts = new ArrayList<>();
         while (!check(RIGHT_BRACE)) {
+            if (check(EOF)) throwUnclosedBlock(openBrace);
             stmts.add(parseStatement());
         }
         expect(RIGHT_BRACE);
         return new BlockStatement(stmts, line);
+    }
+
+    /**
+     * Throws an unclosed block diagnostic anchored at the opening `{`.
+     */
+    private void throwUnclosedBlock(@NotNull Token openBrace) {
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unclosed block: missing `}`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openBrace.line(), SourceLines.lineAt(source, openBrace.line()))
+                .highlight(openBrace.column() - 1, openBrace.column())
+                .label("this `{` is never closed")
+                .note("every `{` must have a matching `}` later in the file")
+                .fix(new Fix(
+                        "add the missing `}`",
+                        null,
+                        List.of(Edit.insertLineAfter(lastSourceLine(), "}", "close the block here")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
+    }
+
+    /**
+     * @return one based last line number of the source text, used as the anchor when suggesting fixes that append at end of file
+     */
+    private int lastSourceLine() {
+        int count = 1;
+        for (int i = 0; i < source.length(); i++) if (source.charAt(i) == '\n') count++;
+        return count;
     }
 
     /**
@@ -1126,6 +1278,42 @@ public final class Parser {
             return parseLabeledStatement();
         }
 
+        if (check(VOID)) {
+            Token tok = current();
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`void` is not allowed at this position")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + 4)
+                    .label("`void` can only be a method return type")
+                    .note("local variables, fields, parameters, and array types cannot be `void`")
+                    .build());
+        }
+
+        if (check(ELSE)) {
+            Token tok = current();
+            String line = SourceLines.lineAt(source, tok.line());
+            int deleteEnd = tok.column() - 1 + 4;
+            while (deleteEnd < line.length() && line.charAt(deleteEnd) == ' ') deleteEnd++;
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`else` without a matching `if`")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + 4)
+                    .label("stray `else` clause")
+                    .note("an `else` may only follow an `if` branch")
+                    .fix(new Fix(
+                            "delete the stray `else`",
+                            null,
+                            List.of(Edit.delete(tok.line(), tok.column() - 1, deleteEnd, null)),
+                            Applicability.MAYBE_INCORRECT))
+                    .build());
+        }
+
         if (isLocalVariableDeclaration()) {
             return parseLocalVariableDeclaration();
         }
@@ -1139,9 +1327,12 @@ public final class Parser {
      * @return the if statement node
      */
     private @NotNull IfStatement parseIfStatement() {
-        int line = current().line();
+        Token ifTok = current();
+        int line = ifTok.line();
         expect(IF);
+        Token openParen = current();
         expect(LEFT_PAREN);
+        if (check(RIGHT_PAREN)) throwEmptyControlCondition("if", ifTok, openParen, current());
         Expression condition = parseExpression();
         expect(RIGHT_PAREN);
         Statement thenBranch = parseStatement();
@@ -1159,9 +1350,12 @@ public final class Parser {
      * @return the while statement node
      */
     private @NotNull WhileStatement parseWhileStatement() {
-        int line = current().line();
+        Token whileTok = current();
+        int line = whileTok.line();
         expect(WHILE);
+        Token openParen = current();
         expect(LEFT_PAREN);
+        if (check(RIGHT_PAREN)) throwEmptyControlCondition("while", whileTok, openParen, current());
         Expression condition = parseExpression();
         expect(RIGHT_PAREN);
         Statement body = parseStatement();
@@ -1358,23 +1552,23 @@ public final class Parser {
     }
 
     private @NotNull Expression parseCaseLabel() {
-        int line = current().line();
+        Token start = current();
         TokenType type = current().type();
         if (type == IDENTIFIER || type == VAR || type == YIELD || type == RECORD) {
             String name = current().value();
             advance();
             if (check(DOT)) {
                 advance();
-                Expression target = new NameExpression(name, line);
+                Expression target = span(start, new NameExpression(name, start.line()));
                 String fieldName = expectIdentifier();
-                return new FieldAccessExpression(target, fieldName, line);
+                return span(start, new FieldAccessExpression(target, fieldName, start.line()));
             }
-            return new NameExpression(name, line);
+            return span(start, new NameExpression(name, start.line()));
         }
         if (type != NULL && type != TRUE && type != FALSE && !type.isPrimitive() && type != INT_LITERAL && type != LONG_LITERAL && type != FLOAT_LITERAL && type != DOUBLE_LITERAL && type != CHAR_LITERAL && type != STRING_LITERAL && type != TEXT_BLOCK && type != LEFT_PAREN && type != NEW && type != THIS && type != SUPER && type != SWITCH && type != MINUS) {
             String name = current().value();
             advance();
-            return new NameExpression(name, line);
+            return span(start, new NameExpression(name, start.line()));
         }
         return parseExpression();
     }
@@ -1444,14 +1638,14 @@ public final class Parser {
      * @return the return statement node
      */
     private @NotNull ReturnStatement parseReturnStatement() {
-        int line = current().line();
+        Token start = current();
         expect(RETURN);
         Expression value = null;
         if (!check(SEMICOLON)) {
             value = parseExpression();
         }
         expect(SEMICOLON);
-        return new ReturnStatement(value, line);
+        return span(start, new ReturnStatement(value, start.line()));
     }
 
     /**
@@ -1473,7 +1667,7 @@ public final class Parser {
      * @return the break statement node
      */
     private @NotNull BreakStatement parseBreakStatement() {
-        int line = current().line();
+        Token start = current();
         expect(BREAK);
         String label = null;
         if (check(IDENTIFIER)) {
@@ -1481,7 +1675,7 @@ public final class Parser {
             advance();
         }
         expect(SEMICOLON);
-        return new BreakStatement(label, line);
+        return span(start, new BreakStatement(label, start.line()));
     }
 
     /**
@@ -1490,7 +1684,7 @@ public final class Parser {
      * @return the continue statement node
      */
     private @NotNull ContinueStatement parseContinueStatement() {
-        int line = current().line();
+        Token start = current();
         expect(CONTINUE);
         String label = null;
         if (check(IDENTIFIER)) {
@@ -1498,7 +1692,7 @@ public final class Parser {
             advance();
         }
         expect(SEMICOLON);
-        return new ContinueStatement(label, line);
+        return span(start, new ContinueStatement(label, start.line()));
     }
 
     /**
@@ -1566,10 +1760,10 @@ public final class Parser {
      * @return the expression statement node
      */
     private @NotNull ExpressionStatement parseExpressionStatement() {
-        int line = current().line();
+        Token start = current();
         Expression expr = parseExpression();
         expect(SEMICOLON);
-        return new ExpressionStatement(expr, line);
+        return span(start, new ExpressionStatement(expr, start.line()));
     }
 
     /**
@@ -1615,7 +1809,7 @@ public final class Parser {
      * @return the variable declaration statement
      */
     private @NotNull VariableDeclarationStatement parseLocalVariableDeclarationNoSemicolon() {
-        int line = current().line();
+        Token start = current();
         List<AnnotationNode> annotations = parseAnnotations();
         int modifiers = parseModifiers();
         TypeNode type = parseType();
@@ -1625,7 +1819,7 @@ public final class Parser {
             advance();
             declarators.add(parseVariableDeclarator());
         }
-        return new VariableDeclarationStatement(type, declarators, modifiers, annotations, line);
+        return span(start, new VariableDeclarationStatement(type, declarators, modifiers, annotations, start.line()));
     }
 
     /**
@@ -1666,11 +1860,12 @@ public final class Parser {
     private @NotNull Expression parseAssignment() {
         Expression left = parseTernary();
         if (current().type().isAssignment()) {
-            int line = current().line();
+            Token opTok = current();
             String op = current().value();
             advance();
             Expression right = parseAssignment();
-            return new AssignmentExpression(left, op, right, line);
+            Token start = startTokenOf(left, opTok);
+            return span(start.line(), start.column(), new AssignmentExpression(left, op, right, opTok.line()));
         }
         return left;
     }
@@ -1979,13 +2174,19 @@ public final class Parser {
                     advance();
                     expr = new FieldAccessExpression(expr, "super", line);
                 } else {
-                    int line = current().line();
+                    Token nameTok = current();
                     String name = expectIdentifier();
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
-                        expr = new MethodCallExpression(expr, name, args, null, line);
+                        Token receiverStart = startTokenOf(expr, nameTok);
+                        MethodCallExpression call = span(receiverStart, new MethodCallExpression(expr, name, args, null, nameTok.line()));
+                        spanTable.recordSub(call, "methodName", new Span(nameTok.line(), nameTok.column(), nameTok.line(), nameTok.column() + name.length() - 1));
+                        expr = call;
                     } else {
-                        expr = new FieldAccessExpression(expr, name, line);
+                        Token receiverStart = startTokenOf(expr, nameTok);
+                        FieldAccessExpression fa = span(receiverStart, new FieldAccessExpression(expr, name, nameTok.line()));
+                        spanTable.recordSub(fa, "fieldName", new Span(nameTok.line(), nameTok.column(), nameTok.line(), nameTok.column() + name.length() - 1));
+                        expr = fa;
                     }
                 }
             } else if (check(LEFT_BRACKET)) {
@@ -2009,7 +2210,8 @@ public final class Parser {
                 } else {
                     name = expectIdentifier();
                 }
-                expr = new MethodReferenceExpression(expr, name, line);
+                Token mrStart = startTokenOf(expr, current());
+                expr = span(mrStart, new MethodReferenceExpression(expr, name, line));
             } else {
                 break;
             }
@@ -2039,7 +2241,8 @@ public final class Parser {
      * @return the expression
      */
     private @NotNull Expression parsePrimary() {
-        int line = current().line();
+        Token start = current();
+        int line = start.line();
 
         switch (current().type()) {
             case INT_LITERAL:
@@ -2051,64 +2254,64 @@ public final class Parser {
             case TEXT_BLOCK, TRUE, FALSE: {
                 Token tok = current();
                 advance();
-                return new LiteralExpression(tok.type(), tok.value(), line);
+                return span(start, new LiteralExpression(tok.type(), tok.value(), line));
             }
             case NULL: {
                 advance();
-                return new LiteralExpression(NULL, "null", line);
+                return span(start, new LiteralExpression(NULL, "null", line));
             }
             case THIS: {
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, "this", args, null, line);
+                    return span(start, new MethodCallExpression(null, "this", args, null, line));
                 }
-                return new ThisExpression(line);
+                return span(start, new ThisExpression(line));
             }
             case SUPER: {
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, "super", args, null, line);
+                    return span(start, new MethodCallExpression(null, "super", args, null, line));
                 }
                 if (check(DOT)) {
                     advance();
                     String name = expectIdentifier();
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
-                        return new MethodCallExpression(new SuperExpression(line), name, args, null, line);
+                        return span(start, new MethodCallExpression(span(start, new SuperExpression(line)), name, args, null, line));
                     }
-                    return new FieldAccessExpression(new SuperExpression(line), name, line);
+                    return span(start, new FieldAccessExpression(span(start, new SuperExpression(line)), name, line));
                 }
-                return new SuperExpression(line);
+                return span(start, new SuperExpression(line));
             }
             case NEW: {
                 advance();
-                return parseNewExpression(line);
+                return span(start, parseNewExpression(line));
             }
             case LEFT_PAREN: {
                 if (isLambda()) {
-                    return parseLambdaExpression(line);
+                    return span(start, parseLambdaExpression(line));
                 }
                 advance();
                 Expression expr = parseExpression();
                 expect(RIGHT_PAREN);
-                return new ParenExpression(expr, line);
+                return span(start, new ParenExpression(expr, line));
             }
             case SWITCH: {
-                return parseSwitchExpr();
+                return span(start, parseSwitchExpr());
             }
             case IDENTIFIER, VAR, YIELD, RECORD: {
                 String name = current().value();
                 if (peek().type() == ARROW) {
-                    return parseSingleParamLambda(name, line);
+                    return span(start, parseSingleParamLambda(name, line));
                 }
                 advance();
                 if (check(LEFT_PAREN)) {
                     List<Expression> args = parseArguments();
-                    return new MethodCallExpression(null, name, args, null, line);
+                    return span(start, new MethodCallExpression(null, name, args, null, line));
                 }
-                return new NameExpression(name, line);
+                return span(start, new NameExpression(name, line));
             }
             default:
                 if (current().type().isPrimitive() || current().type() == VOID) {
@@ -2337,17 +2540,47 @@ public final class Parser {
      * @return the list of argument expressions
      */
     private @NotNull List<Expression> parseArguments() {
+        Token openParen = current();
         expect(LEFT_PAREN);
         List<Expression> args = new ArrayList<>();
         if (!check(RIGHT_PAREN)) {
+            if (check(RIGHT_BRACE) || check(SEMICOLON) || check(EOF)) throwUnclosedParen(openParen);
             args.add(parseExpression());
             while (check(COMMA)) {
                 advance();
+                if (check(RIGHT_BRACE) || check(SEMICOLON) || check(EOF)) throwUnclosedParen(openParen);
                 args.add(parseExpression());
             }
         }
+        if (!check(RIGHT_PAREN)) throwUnclosedParen(openParen);
         expect(RIGHT_PAREN);
         return args;
+    }
+
+    /**
+     * Throws an unclosed parenthesis diagnostic anchored at the opening `(`.
+     */
+    private void throwUnclosedParen(@NotNull Token openParen) {
+        Token here = current();
+        int prevPos = pos > 0 ? pos - 1 : 0;
+        Token prev = tokens[prevPos];
+        int insertLine = prev.line();
+        int insertCol = prev.column() - 1 + prev.value().length();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("unclosed `(`: missing `)`")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openParen.line(), SourceLines.lineAt(source, openParen.line()))
+                .highlight(openParen.column() - 1, openParen.column())
+                .label("this `(` was never closed")
+                .note("argument list runs from here to a matching `)` but the parser hit `" + (here.value().isEmpty() ? "end of file" : here.value()) + "` first")
+                .fix(new Fix(
+                        "insert `)` here",
+                        null,
+                        List.of(Edit.insert(insertLine, insertCol, ")", "close the paren")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
     }
 
     /**
@@ -2369,6 +2602,58 @@ public final class Parser {
      */
     private @NotNull Token current() {
         return tokens[pos];
+    }
+
+    /**
+     * @return last consumed token
+     */
+    private @NotNull Token previous() {
+        return tokens[Math.max(0, pos - 1)];
+    }
+
+    /**
+     * Records a {@link Span} for {@code node} stretching from {@code start} to
+     * the last consumed token.
+     */
+    private <T extends AstNode> @NotNull T span(@NotNull Token start, @NotNull T node) {
+        return span(start.line(), start.column(), node);
+    }
+
+    /**
+     * Records a {@link Span} for {@code node} starting at the given line and
+     * column and ending at the last consumed token.
+     */
+    private <T extends AstNode> @NotNull T span(int startLine, int startColumn, @NotNull T node) {
+        Token end = previous();
+        int endLine = end.line();
+        int endColumn = end.column();
+        String value = end.value();
+        if (!value.isEmpty()) {
+            int lastNewline = value.lastIndexOf('\n');
+            if (lastNewline < 0) {
+                endColumn = end.column() + value.length() - 1;
+            } else {
+                int extraLines = 0;
+                for (int i = 0; i < value.length(); i++) if (value.charAt(i) == '\n') extraLines++;
+                endLine = end.line() + extraLines;
+                endColumn = value.length() - lastNewline - 1;
+                if (endColumn < 1) endColumn = 1;
+            }
+        }
+        spanTable.record(node, new Span(startLine, startColumn, endLine, endColumn));
+        return node;
+    }
+
+    /**
+     * @param receiver expression already given a span when it was constructed
+     * @param fallback token to fall back on when {@code receiver} has no span
+     * @return token-equivalent start position (line plus column) usable with
+     * {@link #span(int, int, AstNode)}
+     */
+    private @NotNull Token startTokenOf(@NotNull AstNode receiver, @NotNull Token fallback) {
+        Span existing = spanTable.span(receiver);
+        if (existing == null) return fallback;
+        return new Token(fallback.type(), fallback.value(), existing.startLine(), existing.startColumn());
     }
 
     /**
@@ -2426,16 +2711,97 @@ public final class Parser {
         if (!check(type)) {
             if (speculativeDepth > 0) throw Backtrack.INSTANCE;
             Token tok = current();
+            if (type == SEMICOLON && (tok.type() == RIGHT_PAREN || tok.type() == RIGHT_BRACKET || tok.type() == RIGHT_BRACE)) {
+                throwStrayCloser(tok);
+            }
             throw new CompilationException(Diagnostic.builder()
                     .severity(Severity.ERROR)
                     .title("expected `" + tokenDisplay(type) + "`, found `" + tok.value() + "`")
                     .sourceFile(sourceFile)
+                    .fullSource(source)
                     .at(tok.line(), SourceLines.lineAt(source, tok.line()))
                     .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
                     .label("expected `" + tokenDisplay(type) + "` here")
                     .build());
         }
         advance();
+    }
+
+    /**
+     * Throws a diagnostic for a stray closing bracket that has no matching
+     * opener in the current parsing context.
+     */
+    private void throwStrayCloser(@NotNull Token tok) {
+        String name = tok.type() == RIGHT_PAREN ? ")" : tok.type() == RIGHT_BRACKET ? "]" : "}";
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("stray `" + name + "` with no matching opener")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                .highlight(tok.column() - 1, tok.column())
+                .label("this `" + name + "` does not close any open `" + matchingOpener(name) + "`")
+                .note("every closing bracket must pair with an earlier opening one")
+                .fix(new Fix(
+                        "delete the stray `" + name + "`",
+                        null,
+                        List.of(Edit.delete(tok.line(), tok.column() - 1, tok.column(), null)),
+                        Applicability.MACHINE_APPLICABLE))
+                .build());
+    }
+
+    private static @NotNull String matchingOpener(@NotNull String closer) {
+        return switch (closer) {
+            case ")" -> "(";
+            case "]" -> "[";
+            case "}" -> "{";
+            default -> closer;
+        };
+    }
+
+    /**
+     * Throws when an {@code if}/{@code while} control structure has an empty
+     * condition between its parentheses.
+     */
+    private void throwEmptyControlCondition(@NotNull String keyword, @NotNull Token keywordTok, @NotNull Token openParen, @NotNull Token closeParen) {
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("`" + keyword + "` has no condition")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(keywordTok.line(), SourceLines.lineAt(source, keywordTok.line()))
+                .highlight(openParen.column() - 1, closeParen.column())
+                .label("empty `()` is not a valid `" + keyword + "` condition")
+                .note("`" + keyword + "` requires a boolean expression between the parentheses")
+                .fix(new Fix(
+                        "insert placeholder condition",
+                        null,
+                        List.of(Edit.replace(openParen.line(), openParen.column(), closeParen.column() - 1, "<condition>", "fill in the boolean expression")),
+                        Applicability.HAS_PLACEHOLDER))
+                .build());
+    }
+
+    /**
+     * Throws when an annotation argument list opens with {@code (} but never
+     * closes before the next declaration or end of file.
+     */
+    private void throwUnclosedAnnotationArg(@NotNull String name, @NotNull Token openParen) {
+        Token here = current();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("annotation `@" + name + "` has unclosed argument list")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openParen.line(), SourceLines.lineAt(source, openParen.line()))
+                .highlight(openParen.column() - 1, openParen.column())
+                .label("this `(` is never closed")
+                .note("annotation arguments must finish with a `)` before the next token, but the parser hit `" + (here.value().isEmpty() ? "end of file" : here.value()) + "` first")
+                .fix(new Fix(
+                        "close the annotation argument list",
+                        null,
+                        List.of(Edit.insert(openParen.line(), openParen.column(), ")", "insert `)`")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
     }
 
     /**

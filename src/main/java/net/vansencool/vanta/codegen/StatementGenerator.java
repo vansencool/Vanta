@@ -2,12 +2,18 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.flow.JumpOutsideLoopDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.flow.UnreachableCodeDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.name.DuplicateLocalDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.typecheck.ReturnTypeDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.codegen.statement.loop.LoopStatementEmitter;
 import net.vansencool.vanta.codegen.statement.pattern.PatternBindingHelper;
 import net.vansencool.vanta.codegen.statement.sw.SwitchStatementEmitter;
 import net.vansencool.vanta.codegen.statement.tryblock.TryStatementEmitter;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.NewArrayExpression;
@@ -115,7 +121,7 @@ public final class StatementGenerator {
         } else if (stmt instanceof AssertStatement assertStmt) {
             generateAssert(assertStmt);
         } else {
-            throw new CodeGenException("Unsupported statement type: " + stmt.getClass().getSimpleName(), stmt.line());
+            throw new IllegalStateException("internal compiler error: unhandled statement kind " + stmt.getClass().getSimpleName() + " at line " + stmt.line());
         }
     }
 
@@ -126,8 +132,13 @@ public final class StatementGenerator {
      */
     private void generateBlock(@NotNull BlockStatement block) {
         int savedSlot = ctx.scope().nextLocalIndex();
+        Statement terminator = null;
         for (Statement stmt : block.statements()) {
+            if (!ctx.isReachable() && terminator != null) {
+                throw new CompilationException(UnreachableCodeDiagnostic.build(ctx, stmt, terminator));
+            }
             generate(stmt);
+            if (!ctx.isReachable() && terminator == null) terminator = stmt;
         }
         ctx.scope().removeVariablesFrom(savedSlot);
         ctx.scope().syncNextLocalIndex(savedSlot);
@@ -164,11 +175,18 @@ public final class StatementGenerator {
             } else {
                 resolvedType = ctx.typeResolver().resolve(effectiveType);
             }
-            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType);
+            LocalVariable preexisting = ctx.scope().resolve(declarator.name());
+            if (preexisting != null) throw new CompilationException(DuplicateLocalDiagnostic.build(ctx, varDecl, declarator.name(), preexisting));
+            boolean isFinalLocal = (varDecl.modifiers() & Opcodes.ACC_FINAL) != 0;
+            boolean hasInit = declarator.initializer() != null;
+            LocalVariable local = ctx.declareLocal(declarator.name(), resolvedType, isFinalLocal, hasInit, varDecl);
 
             if (declarator.initializer() != null) {
-                exprGen.generate(declarator.initializer(), resolvedType);
                 ResolvedType initType = ctx.typeInferrer().infer(declarator.initializer());
+                if (!TypeCompatibility.assignable(exprGen, resolvedType, initType, declarator.initializer())) {
+                    throw new CompilationException(AssignmentTypeDiagnostic.build(ctx, exprGen, varDecl, declarator.initializer(), "variable '" + declarator.name() + "'", resolvedType, initType));
+                }
+                exprGen.generate(declarator.initializer(), resolvedType);
                 boolean initIsNull = initType == ResolvedType.NULL;
                 boolean literalCoerced = declarator.initializer() instanceof LiteralExpression lit && exprGen.litHandledExpectedType(lit, resolvedType.descriptor());
                 boolean descriptorsDiffer = initType != null && !resolvedType.descriptor().equals(initType.descriptor());
@@ -182,7 +200,7 @@ public final class StatementGenerator {
                     }
                 } else if (!initIsNull && resolvedType.isArray() && initType != null && !initType.isPrimitive()
                         && descriptorsDiffer
-                        && "java/lang/Object".equals(initType.internalName())
+                        && (initType.descriptor().startsWith("[") || "java/lang/Object".equals(initType.internalName()))
                         && !(declarator.initializer() instanceof NewArrayExpression)
                         && !(declarator.initializer() instanceof ArrayInitializerExpression)) {
                     mv.visitTypeInsn(Opcodes.CHECKCAST, resolvedType.descriptor());
@@ -202,12 +220,19 @@ public final class StatementGenerator {
         ctx.emitLine(ret.line());
 
         if (ret.value() != null) {
+            ResolvedType expected = ctx.returnType();
+            ResolvedType actual = ctx.typeInferrer().infer(ret.value());
+            if (expected != null && !TypeCompatibility.assignable(exprGen, expected, actual, ret.value())) {
+                throw new CompilationException(ReturnTypeDiagnostic.build(ctx, exprGen, ret, ret.value(), expected, actual));
+            }
             exprGen.generate(ret.value(), ctx.returnType());
             ResolvedType type = ctx.typeInferrer().infer(ret.value());
             ResolvedType methodReturn = ctx.returnType();
             boolean valueAlreadyCoerced = ret.value() instanceof TernaryExpression
                     || ret.value() instanceof SwitchExpression;
-            if (type != null && type != ResolvedType.NULL && methodReturn != null && "Ljava/lang/Object;".equals(type.descriptor()) && methodReturn.internalName() != null && !"java/lang/Object".equals(methodReturn.internalName()) && !methodReturn.descriptor().startsWith("[")) {
+            if (type != null && type != ResolvedType.NULL && methodReturn != null && !type.isPrimitive() && type.internalName() != null && methodReturn.internalName() != null && !"java/lang/Object".equals(methodReturn.internalName()) && !methodReturn.descriptor().startsWith("[")
+                    && !type.internalName().equals(methodReturn.internalName())
+                    && !exprGen.isSubtype(type.internalName(), methodReturn.internalName(), new HashSet<>())) {
                 mv.visitTypeInsn(Opcodes.CHECKCAST, methodReturn.internalName());
             }
             if (type != null && type != ResolvedType.NULL && methodReturn != null && methodReturn.descriptor().startsWith("[")
@@ -352,7 +377,9 @@ public final class StatementGenerator {
      * @param breakStmt the break statement
      */
     private void generateBreak(@NotNull BreakStatement breakStmt) {
-        ctx.mv().visitJumpInsn(Opcodes.GOTO, ctx.labelContext().breakLabel(breakStmt.label()));
+        Label target = ctx.labelContext().breakLabelOrNull(breakStmt.label());
+        if (target == null) throw new CompilationException(JumpOutsideLoopDiagnostic.build(ctx, breakStmt, "break", "loop or switch"));
+        ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
         if (breakStmt.label() == null) ctx.labelContext().markCurrentLoopBreak();
         ctx.markUnreachable();
     }
@@ -364,10 +391,9 @@ public final class StatementGenerator {
      */
     private void generateContinue(@NotNull ContinueStatement continueStmt) {
         Label target = ctx.labelContext().continueLabel(continueStmt.label());
-        if (target != null) {
-            ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
-            ctx.markUnreachable();
-        }
+        if (target == null) throw new CompilationException(JumpOutsideLoopDiagnostic.build(ctx, continueStmt, "continue", "loop"));
+        ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
+        ctx.markUnreachable();
     }
 
     /**

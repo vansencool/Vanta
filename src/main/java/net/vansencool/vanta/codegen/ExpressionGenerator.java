@@ -2,7 +2,7 @@ package net.vansencool.vanta.codegen;
 
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.name.UnresolvedNameDiagnostic;
 import net.vansencool.vanta.codegen.expression.array.ArrayEmitter;
 import net.vansencool.vanta.codegen.expression.assign.AssignmentEmitter;
 import net.vansencool.vanta.codegen.expression.binary.BinaryExpressionEmitter;
@@ -25,6 +25,7 @@ import net.vansencool.vanta.codegen.expression.unary.UnaryExpressionEmitter;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
 import net.vansencool.vanta.codegen.expression.util.literal.LiteralPredicates;
 import net.vansencool.vanta.codegen.expression.walker.ExpressionWalker;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.expression.ArrayAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
@@ -335,7 +336,7 @@ public final class ExpressionGenerator {
         } else if (expr instanceof MethodReferenceExpression methodRef) {
             lambdaEmitter.emitMethodReference(methodRef, expected);
         } else {
-            throw new CodeGenException("Unsupported expression type: " + expr.getClass().getSimpleName(), expr.line());
+            throw new IllegalStateException("internal compiler error: unhandled expression kind " + expr.getClass().getSimpleName() + " at line " + expr.line());
         }
     }
 
@@ -546,6 +547,9 @@ public final class ExpressionGenerator {
             boolean isSelfConstant = resolved == null && ctx.nestedClassConstants() != null
                     && ctx.nestedClassConstants().getOrDefault(ctx.classInternalName(), Map.of()).containsKey(name.name());
             boolean isSelfStaticField = resolved == null && ctx.typeInferrer().isStaticField(name.name());
+            if (resolved == null && !isSelfConstant && !isSelfStaticField && fieldType == null) {
+                throw new CompilationException(UnresolvedNameDiagnostic.build(ctx, name));
+            }
             String fieldOwner = resolved != null ? resolved.owner() : ctx.classInternalName();
             if (resolvedStatic || isSelfStaticField || (!hasImplicitThis) || isSelfConstant) {
                 if (resolvedStatic && constantInliner.tryInline(resolved.owner(), resolved.name())) return;

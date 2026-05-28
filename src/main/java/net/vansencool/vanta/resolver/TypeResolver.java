@@ -32,7 +32,6 @@ public final class TypeResolver {
     private final @NotNull Map<String, String> innerClassMap;
     private final @NotNull Map<String, ResolvedType> typeParameterErasures;
     private final @NotNull Map<String, List<ResolvedType>> typeParameterBounds;
-    private final @NotNull Map<String, ResolvedType> baseNameCache = new ConcurrentHashMap<>();
     private final @NotNull ThreadLocal<Map<String, ResolvedType>> tlErasures = new ThreadLocal<>();
     private final @NotNull ThreadLocal<Map<String, List<ResolvedType>>> tlBounds = new ThreadLocal<>();
 
@@ -116,7 +115,6 @@ public final class TypeResolver {
 
     public void registerInnerClass(@NotNull String simpleName, @NotNull String outerInternalName) {
         innerClassMap.put(simpleName, outerInternalName + "$" + simpleName);
-        baseNameCache.remove(simpleName);
     }
 
     /**
@@ -176,7 +174,6 @@ public final class TypeResolver {
             } else {
                 erasures.put(tp.name(), ResolvedType.ofObject("java/lang/Object"));
             }
-            baseNameCache.remove(tp.name());
         }
     }
 
@@ -309,13 +306,46 @@ public final class TypeResolver {
      * @return the resolved type
      */
     private @NotNull ResolvedType resolveBaseName(@NotNull String name) {
+        ResolvedType primitive = ResolvedType.fromPrimitiveName(name);
+        if (primitive != null) return primitive;
+        if ("void".equals(name)) return ResolvedType.VOID;
         ResolvedType erased = erasureView().get(name);
         if (erased != null) return erased;
-        ResolvedType cached = baseNameCache.get(name);
-        if (cached != null) return cached;
-        ResolvedType result = resolveBaseNameUncached(name);
-        baseNameCache.put(name, result);
-        return result;
+        if (name.contains("/")) return ResolvedType.ofObject(name);
+        if (name.contains(".")) {
+            int dot = name.indexOf('.');
+            String head = name.substring(0, dot);
+            String tail = name.substring(dot + 1);
+            if (!head.contains("/")) {
+                ResolvedType headResolved = resolveBaseName(head);
+                if (headResolved.internalName() != null) {
+                    String candidate = headResolved.internalName() + "$" + tail.replace('.', '$');
+                    if (classpathManager.exists(candidate)) return ResolvedType.ofObject(candidate);
+                }
+            }
+            String resolved = resolveDottedFqn(name);
+            if (resolved != null) return ResolvedType.ofObject(resolved);
+            return ResolvedType.ofObject(name.replace('.', '/'));
+        }
+        String mapped = importMap.get(name);
+        if (mapped != null) return ResolvedType.ofObject(dottedFqnToInternal(mapped));
+        String innerMapping = innerClassMap.get(name);
+        if (innerMapping != null) return ResolvedType.ofObject(innerMapping);
+        for (String importedFqn : importMap.values()) {
+            String nested = importedFqn.replace('.', '/') + "$" + name;
+            if (classpathManager.exists(nested)) return ResolvedType.ofObject(nested);
+        }
+        if (packageName != null) {
+            String fqn = packageName + "." + name;
+            String internal = fqn.replace('.', '/');
+            if (classpathManager.exists(internal)) return ResolvedType.ofObject(internal);
+        }
+        for (String wildcardImport : wildcardImports) {
+            String fqn = wildcardImport + "." + name;
+            String internal = fqn.replace('.', '/');
+            if (classpathManager.exists(internal)) return ResolvedType.ofObject(internal);
+        }
+        return ResolvedType.ofObject(name.replace('.', '/'));
     }
 
     /**
@@ -340,73 +370,6 @@ public final class TypeResolver {
         return null;
     }
 
-    private @NotNull ResolvedType resolveBaseNameUncached(@NotNull String name) {
-        ResolvedType primitive = ResolvedType.fromPrimitiveName(name);
-        if (primitive != null) return primitive;
-
-        if ("void".equals(name)) return ResolvedType.VOID;
-
-        ResolvedType erased = erasureView().get(name);
-        if (erased != null) return erased;
-
-        if (name.contains("/")) {
-            return ResolvedType.ofObject(name);
-        }
-
-        if (name.contains(".")) {
-            int dot = name.indexOf('.');
-            String head = name.substring(0, dot);
-            String tail = name.substring(dot + 1);
-            if (!head.contains("/")) {
-                ResolvedType headResolved = resolveBaseName(head);
-                if (headResolved.internalName() != null) {
-                    String candidate = headResolved.internalName() + "$" + tail.replace('.', '$');
-                    if (classpathManager.exists(candidate)) {
-                        return ResolvedType.ofObject(candidate);
-                    }
-                }
-            }
-            String resolved = resolveDottedFqn(name);
-            if (resolved != null) return ResolvedType.ofObject(resolved);
-            return ResolvedType.ofObject(name.replace('.', '/'));
-        }
-
-        String mapped = importMap.get(name);
-        if (mapped != null) {
-            return ResolvedType.ofObject(dottedFqnToInternal(mapped));
-        }
-
-        String innerMapping = innerClassMap.get(name);
-        if (innerMapping != null) {
-            return ResolvedType.ofObject(innerMapping);
-        }
-
-        for (String importedFqn : importMap.values()) {
-            String nested = importedFqn.replace('.', '/') + "$" + name;
-            if (classpathManager.exists(nested)) {
-                return ResolvedType.ofObject(nested);
-            }
-        }
-
-        if (packageName != null) {
-            String fqn = packageName + "." + name;
-            String internal = fqn.replace('.', '/');
-            if (classpathManager.exists(internal)) {
-                return ResolvedType.ofObject(internal);
-            }
-        }
-
-        for (String wildcardImport : wildcardImports) {
-            String fqn = wildcardImport + "." + name;
-            String internal = fqn.replace('.', '/');
-            if (classpathManager.exists(internal)) {
-                return ResolvedType.ofObject(internal);
-            }
-        }
-
-        String internal = name.replace('.', '/');
-        return ResolvedType.ofObject(internal);
-    }
 
     /**
      * Builds a method descriptor from parameter types and return type.

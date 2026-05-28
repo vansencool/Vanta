@@ -8,6 +8,8 @@ import net.vansencool.vanta.codegen.SelfMethodInfo;
 import net.vansencool.vanta.codegen.StatementGenerator;
 import net.vansencool.vanta.codegen.classes.visitor.RecordingMethodVisitor;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.FieldDeclaration;
@@ -113,10 +115,61 @@ public final class MethodEmitter {
                 if ("<iinit>".equals(methodDecl.name())) continue;
                 if (isRecord && "<init>".equals(methodDecl.name()) && methodDecl.parameters().size() == recordComponentCount)
                     continue;
-                emitMethod(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
+                emitMethodWithRecovery(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
             }
         }
         owner.bridgeMethodEmitter().emit(cw, classDecl, internalName);
+    }
+
+    /**
+     * Invokes {@link #emitMethod} guarded by a {@link CompilationException}
+     * catch when a {@link DiagnosticReport} is attached: records the failure
+     * against the current file + method group and emits a stub body so the
+     * class stays loadable.
+     */
+    private void emitMethodWithRecovery(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String internalName, @NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull ClassDeclaration classDecl) {
+        DiagnosticReport report = owner.report();
+        if (report == null) {
+            emitMethod(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
+            return;
+        }
+        try {
+            emitMethod(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
+        } catch (CompilationException e) {
+            report.report(owner.sourceFile(), methodKey(methodDecl), e.diagnostic());
+            emitStubMethod(cw, methodDecl, e.diagnostic().title());
+        }
+    }
+
+    /**
+     * Emits a placeholder body that throws an {@link AssertionError} at runtime
+     * so the class file still verifies despite the unrecovered diagnostic.
+     */
+    private void emitStubMethod(@NotNull ClassWriter cw, @NotNull MethodDeclaration methodDecl, @NotNull String reason) {
+        List<TypeNode> paramTypeNodes = new ArrayList<>();
+        for (Parameter p : methodDecl.parameters()) paramTypeNodes.add(p.type());
+        String descriptor = owner.typeResolver().methodDescriptor(paramTypeNodes, methodDecl.returnType());
+        MethodVisitor mv = cw.visitMethod(methodDecl.modifiers(), methodDecl.name(), descriptor, null, null);
+        mv.visitCode();
+        mv.visitTypeInsn(Opcodes.NEW, "java/lang/AssertionError");
+        mv.visitInsn(Opcodes.DUP);
+        mv.visitLdcInsn("compile error in " + methodDecl.name() + ": " + reason);
+        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/AssertionError", "<init>", "(Ljava/lang/Object;)V", false);
+        mv.visitInsn(Opcodes.ATHROW);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+    }
+
+    private static @NotNull String methodKey(@NotNull MethodDeclaration methodDecl) {
+        StringBuilder sb = new StringBuilder(methodDecl.name());
+        sb.append('(');
+        boolean first = true;
+        for (Parameter p : methodDecl.parameters()) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(p.type().name());
+        }
+        return sb.append(')').toString();
     }
 
     /**
@@ -225,7 +278,7 @@ public final class MethodEmitter {
         int workers = MethodParallelism.workers();
         if (workers <= 1 || methods.size() <= 1) {
             for (MethodDeclaration md : methods)
-                emitMethod(cw, md, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
+                emitMethodWithRecovery(cw, md, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
             return;
         }
         Object scopeSnapshot = owner.typeResolver().captureScope();
@@ -246,7 +299,7 @@ public final class MethodEmitter {
                     try {
                         for (int i = from; i < to; i++) {
                             if (failure.get() != null) return;
-                            emitMethod(cw, methods.get(i), internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
+                            emitMethodWithRecovery(cw, methods.get(i), internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, classDecl);
                             orderedDeferred.put(i, pendingMethods.get());
                             pendingMethods.set(new ArrayList<>());
                         }
@@ -336,6 +389,7 @@ public final class MethodEmitter {
             scope.syncNextLocalIndex(nextSlot);
 
             MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, isStaticMethod, selfMethods);
+            ctx.seedReassignedLocals(EffectivelyFinalAnalyzer.analyze(methodDecl));
             ctx.enclosingOuterInternal(owner.currentEnclosingOuter());
             ctx.enclosingStaticOuter(owner.currentStaticOuter());
             ctx.nestedClassFields(owner.nestedClassFields());

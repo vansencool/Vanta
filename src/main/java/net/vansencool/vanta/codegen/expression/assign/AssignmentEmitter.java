@@ -3,16 +3,17 @@ package net.vansencool.vanta.codegen.expression.assign;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
-import net.vansencool.vanta.codegen.exception.CodeGenException;
+import net.vansencool.vanta.codegen.diagnostic.name.FinalReassignmentDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.typecheck.AssignmentTypeDiagnostic;
+import net.vansencool.vanta.codegen.diagnostic.util.TypeCompatibility;
 import net.vansencool.vanta.codegen.expression.cast.PrimitiveConversionEmitter;
 import net.vansencool.vanta.codegen.expression.coercion.NumericCoercion;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
-import net.vansencool.vanta.lexer.token.TokenType;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.parser.ast.expression.ArrayAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.AssignmentExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
-import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.scope.LocalVariable;
@@ -52,7 +53,9 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
+                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
+                    checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value());
                 } else {
                     ctx.mv().visitVarInsn(OpcodeUtils.loadOpcode(local.type()), local.index());
@@ -78,6 +81,7 @@ public final class AssignmentEmitter {
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
+                        checkAssignable(assignment, "field '" + nameExpr.name() + "'", fieldType, assignment.value());
                         exprGen.generate(assignment.value());
                     }
                     ctx.mv().visitInsn(Opcodes.DUP_X1);
@@ -90,6 +94,7 @@ public final class AssignmentEmitter {
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
+                        checkAssignable(assignment, "static field '" + nameExpr.name() + "'", fieldType, assignment.value());
                         exprGen.generate(assignment.value());
                     }
                     ctx.mv().visitInsn(fieldType.stackSize() == 2 ? Opcodes.DUP2 : Opcodes.DUP);
@@ -103,6 +108,7 @@ public final class AssignmentEmitter {
                 String fieldOwner = staticResolved.owner();
                 ResolvedType fieldType = ResolvedType.fromDescriptor(fieldDesc);
                 if ("=".equals(assignment.operator())) {
+                    checkAssignable(assignment, "static field '" + fieldOwner.replace('/', '.') + "." + staticResolved.name() + "'", fieldType, assignment.value());
                     exprGen.generate(assignment.value());
                     exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                 } else {
@@ -123,6 +129,7 @@ public final class AssignmentEmitter {
                 if (recvType != null && recvType.internalName() != null) fieldOwner = recvType.internalName();
                 exprGen.generate(fieldAccess.target());
                 if ("=".equals(assignment.operator())) {
+                    if (targetType != null) checkAssignable(assignment, "field '" + fieldAccess.fieldName() + "' on " + fieldOwner.replace('/', '.'), targetType, assignment.value());
                     exprGen.generate(assignment.value());
                     if (targetType != null) exprGen.numericCoercion().adaptForStore(targetType, assignment.value());
                 } else {
@@ -139,6 +146,7 @@ public final class AssignmentEmitter {
         } else if (assignment.target() instanceof ArrayAccessExpression arrayAccess) {
             ResolvedType elemType = ctx.typeInferrer().infer(arrayAccess);
             String elemDesc = elemType != null ? elemType.descriptor() : "I";
+            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "array element of type '" + TypeCompatibility.display(elemType) + "'", elemType, assignment.value());
             exprGen.generate(arrayAccess.array());
             exprGen.generate(arrayAccess.index());
             if ("=".equals(assignment.operator())) {
@@ -170,7 +178,9 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
+                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
+                    checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value(), local.type());
                     exprGen.numericCoercion().adaptForStore(local.type(), assignment.value());
                 } else if (tryEmitIinc(assignment.operator(), local, assignment.value())) {
@@ -199,6 +209,7 @@ public final class AssignmentEmitter {
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
+                        if (fieldType != null) checkAssignable(assignment, "field '" + nameExpr.name() + "'", fieldType, assignment.value());
                         exprGen.generate(assignment.value(), fieldType);
                         if (fieldType != null) exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                     }
@@ -211,6 +222,7 @@ public final class AssignmentEmitter {
                         emitCompoundAssignOp(assignment.operator(), fieldDesc);
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
+                        if (fieldType != null) checkAssignable(assignment, "static field '" + nameExpr.name() + "'", fieldType, assignment.value());
                         exprGen.generate(assignment.value(), fieldType);
                         if (fieldType != null) exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                     }
@@ -224,6 +236,7 @@ public final class AssignmentEmitter {
                 String fieldOwner = staticResolved.owner();
                 ResolvedType fieldType = ResolvedType.fromDescriptor(fieldDesc);
                 if ("=".equals(assignment.operator())) {
+                    checkAssignable(assignment, "static field '" + fieldOwner.replace('/', '.') + "." + staticResolved.name() + "'", fieldType, assignment.value());
                     exprGen.generate(assignment.value(), fieldType);
                     exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                 } else {
@@ -241,6 +254,7 @@ public final class AssignmentEmitter {
                 String fieldOwner = ctx.classInternalName();
                 ResolvedType recvType = ctx.typeInferrer().infer(fieldAccess.target());
                 if (recvType != null && recvType.internalName() != null) fieldOwner = recvType.internalName();
+                if ("=".equals(assignment.operator()) && targetType != null) checkAssignable(assignment, "field '" + fieldAccess.fieldName() + "' on " + fieldOwner.replace('/', '.'), targetType, assignment.value());
                 exprGen.generate(fieldAccess.target());
                 if ("=".equals(assignment.operator())) {
                     exprGen.generate(assignment.value(), targetType);
@@ -257,6 +271,7 @@ public final class AssignmentEmitter {
             }
         } else if (assignment.target() instanceof ArrayAccessExpression arrayAccess) {
             ResolvedType elemType = ctx.typeInferrer().infer(arrayAccess);
+            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "array element of type '" + TypeCompatibility.display(elemType) + "'", elemType, assignment.value());
             if ("=".equals(assignment.operator())) {
                 exprGen.generate(arrayAccess.array());
                 exprGen.generate(arrayAccess.index());
@@ -321,7 +336,7 @@ public final class AssignmentEmitter {
             case "<<=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHL : Opcodes.ISHL);
             case ">>=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LSHR : Opcodes.ISHR);
             case ">>>=" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LUSHR : Opcodes.IUSHR);
-            default -> throw new CodeGenException("Unknown compound assignment: " + operator, 0);
+            default -> throw new IllegalStateException("internal compiler error: parser produced unknown compound assignment operator '" + operator + "'");
         }
     }
 
@@ -363,5 +378,22 @@ public final class AssignmentEmitter {
         if (delta < Short.MIN_VALUE || delta > Short.MAX_VALUE) return false;
         exprGen.ctx().mv().visitIincInsn(local.index(), delta);
         return true;
+    }
+
+    /**
+     * Throws {@link CompilationException} carrying an
+     * {@link AssignmentTypeDiagnostic} when {@code value} cannot be assigned to
+     * {@code targetType}. Allowed assignments return silently.
+     *
+     * @param assignment AST node enclosing the assignment, used for the main span
+     * @param targetName what the target slot is, used in the diagnostic title
+     * @param targetType declared destination type
+     * @param value      source expression on the right hand side
+     */
+    private void checkAssignable(@NotNull AssignmentExpression assignment, @NotNull String targetName, @NotNull ResolvedType targetType, @NotNull Expression value) {
+        MethodContext ctx = exprGen.ctx();
+        ResolvedType actual = ctx.typeInferrer().infer(value);
+        if (TypeCompatibility.assignable(exprGen, targetType, actual, value)) return;
+        throw new CompilationException(AssignmentTypeDiagnostic.build(ctx, exprGen, assignment, value, targetName, targetType, actual));
     }
 }

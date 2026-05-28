@@ -16,6 +16,7 @@ import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -100,6 +101,13 @@ public final class TypeRegistry {
      */
     public boolean hasAstSource(@NotNull String internalName) {
         return astSources.containsKey(internalName);
+    }
+
+    /**
+     * @return internal names of every type currently registered from parsed source
+     */
+    public @NotNull Set<String> astSourceNames() {
+        return astSources.keySet();
     }
 
     private record AstEntry(@NotNull String sourceFile, @NotNull CompilationUnit cu,

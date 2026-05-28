@@ -1,5 +1,6 @@
 package net.vansencool.vanta.diagnostic;
 
+import net.vansencool.vanta.diagnostic.fix.Fix;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -12,6 +13,7 @@ public final class DiagnosticBuilder {
     private final @NotNull List<ContextLine> contextLines = new ArrayList<>();
     private final @NotNull List<String> notes = new ArrayList<>();
     private final @NotNull List<String> helpLines = new ArrayList<>();
+    private final @NotNull List<Fix> fixes = new ArrayList<>();
     private @NotNull Severity severity = Severity.ERROR;
     private @NotNull String title = "";
     private @Nullable String sourceFile = null;
@@ -20,6 +22,7 @@ public final class DiagnosticBuilder {
     private int columnStart = -1;
     private int columnEnd = -1;
     private @Nullable String underlineLabel = null;
+    private @Nullable String fullSource = null;
 
     DiagnosticBuilder() {
     }
@@ -76,7 +79,21 @@ public final class DiagnosticBuilder {
         return this;
     }
 
+    public @NotNull DiagnosticBuilder fix(@NotNull Fix fix) {
+        this.fixes.add(fix);
+        return this;
+    }
+
+    /**
+     * Stores the full source text so {@link Fix} edits can render real patch
+     * blocks against the surrounding lines, not just the single source line.
+     */
+    public @NotNull DiagnosticBuilder fullSource(@NotNull String source) {
+        this.fullSource = source;
+        return this;
+    }
+
     public @NotNull Diagnostic build() {
-        return new Diagnostic(severity, title, sourceFile, line, sourceText, columnStart, columnEnd, underlineLabel, List.copyOf(subHighlights), List.copyOf(contextLines), List.copyOf(notes), List.copyOf(helpLines));
+        return new Diagnostic(severity, title, sourceFile, line, sourceText, columnStart, columnEnd, underlineLabel, List.copyOf(subHighlights), List.copyOf(contextLines), List.copyOf(notes), List.copyOf(helpLines), List.copyOf(fixes), fullSource);
     }
 }

@@ -17,6 +17,7 @@ import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.classes.scan.AnonCounter;
 import net.vansencool.vanta.codegen.classes.scan.AssertScanner;
 import net.vansencool.vanta.codegen.classes.writer.VantaClassWriter;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.EnumConstant;
@@ -28,6 +29,7 @@ import net.vansencool.vanta.parser.ast.declaration.RecordComponent;
 import net.vansencool.vanta.parser.ast.declaration.TypeKind;
 import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.NewExpression;
+import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.resolver.type.ResolvedType;
@@ -67,6 +69,9 @@ public final class ClassGenerator {
     private final @NotNull ClasspathManager classpathManager;
     private final @NotNull TypeResolver typeResolver;
     private final @Nullable String sourceFile;
+    private final @NotNull String source;
+    private final @NotNull SpanTable spanTable;
+    private @Nullable DiagnosticReport report;
 
     private final @NotNull AtomicInteger lambdaCounter = new AtomicInteger(0);
     private final @NotNull List<byte[]> anonClassBytecodes = new ArrayList<>();
@@ -103,11 +108,15 @@ public final class ClassGenerator {
      * @param classpathManager classpath used to load external classes and cache common-super queries
      * @param typeResolver     resolver used by every emitter for source-to-internal-name conversion
      * @param sourceFile       source file name written into the {@code SourceFile} attribute, or null
+     * @param source           full source text of the compilation unit
+     * @param spanTable        per AST node source spans recorded by the parser
      */
-    public ClassGenerator(@NotNull ClasspathManager classpathManager, @NotNull TypeResolver typeResolver, @Nullable String sourceFile) {
+    public ClassGenerator(@NotNull ClasspathManager classpathManager, @NotNull TypeResolver typeResolver, @Nullable String sourceFile, @NotNull String source, @NotNull SpanTable spanTable) {
         this.classpathManager = classpathManager;
         this.typeResolver = typeResolver;
         this.sourceFile = sourceFile;
+        this.source = source;
+        this.spanTable = spanTable;
         this.constantFolder = new ConstantFolder(typeResolver, classpathManager);
         this.annotationEmitter = new AnnotationEmitter(typeResolver, classpathManager.typeRegistry());
         this.bridgeMethodEmitter = new BridgeMethodEmitter(typeResolver, classpathManager.typeRegistry());
@@ -270,6 +279,34 @@ public final class ClassGenerator {
      */
     public @Nullable String sourceFile() {
         return sourceFile;
+    }
+
+    /**
+     * @return full source text of the compilation unit
+     */
+    public @NotNull String source() {
+        return source;
+    }
+
+    /**
+     * @return per AST node source spans recorded by the parser
+     */
+    public @NotNull SpanTable spanTable() {
+        return spanTable;
+    }
+
+    /**
+     * @return active diagnostic report sink for batch error recovery, or null when single error mode
+     */
+    public @Nullable DiagnosticReport report() {
+        return report;
+    }
+
+    /**
+     * Sets the diagnostic report sink for batch error recovery.
+     */
+    public void report(@Nullable DiagnosticReport report) {
+        this.report = report;
     }
 
     /**
@@ -692,7 +729,8 @@ public final class ClassGenerator {
                 for (Parameter p : methodDecl.parameters()) paramTypes.add(p.type());
                 String desc = typeResolver.methodDescriptor(paramTypes, methodDecl.returnType());
                 boolean isStatic = (methodDecl.modifiers() & Opcodes.ACC_STATIC) != 0;
-                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic);
+                boolean isVarargs = !methodDecl.parameters().isEmpty() && methodDecl.parameters().get(methodDecl.parameters().size() - 1).isVarargs();
+                SelfMethodInfo info = new SelfMethodInfo(internalName, methodDecl.name(), desc, isStatic, isVarargs);
                 String baseKey = methodDecl.name() + ":" + methodDecl.parameters().size();
                 if (!selfMethods.containsKey(baseKey)) selfMethods.put(baseKey, info);
                 else selfMethods.put(baseKey + "#" + desc, info);
@@ -754,12 +792,15 @@ public final class ClassGenerator {
         Map<String, SelfMethodInfo> methods = new HashMap<>();
         for (AstNode member : classDecl.members()) {
             if (member instanceof MethodDeclaration md) {
+                if (md.typeParameters() != null && !md.typeParameters().isEmpty())
+                    typeResolver.registerTypeParameters(md.typeParameters());
                 List<TypeNode> paramTypes = new ArrayList<>();
                 for (Parameter p : md.parameters()) paramTypes.add(p.type());
                 String desc = typeResolver.methodDescriptor(paramTypes, md.returnType());
                 boolean isStatic = (md.modifiers() & Opcodes.ACC_STATIC) != 0;
+                boolean isVarargs = !md.parameters().isEmpty() && md.parameters().get(md.parameters().size() - 1).isVarargs();
                 String key = md.name() + ":" + md.parameters().size();
-                methods.putIfAbsent(key, new SelfMethodInfo(internalName, md.name(), desc, isStatic));
+                methods.putIfAbsent(key, new SelfMethodInfo(internalName, md.name(), desc, isStatic, isVarargs));
             }
         }
         nestedClassMethods.put(internalName, methods);

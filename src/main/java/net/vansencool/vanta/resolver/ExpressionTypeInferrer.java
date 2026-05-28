@@ -410,7 +410,12 @@ public final class ExpressionTypeInferrer {
         }
         if (expr instanceof InstanceofExpression) return ResolvedType.BOOLEAN;
         if (expr instanceof ArrayAccessExpression arrayAccess) return inferArrayAccess(arrayAccess);
-        if (expr instanceof ArrayInitializerExpression) return ResolvedType.INT.asArray(1);
+        if (expr instanceof ArrayInitializerExpression init) {
+            if (init.elements().isEmpty()) return null;
+            ResolvedType elemType = infer(init.elements().get(0));
+            if (elemType == null) return null;
+            return elemType.asArray(1);
+        }
         if (expr instanceof BinaryExpression binary) return inferBinary(binary);
         if (expr instanceof UnaryExpression unary) return inferUnary(unary);
         if (expr instanceof AssignmentExpression assign) {
@@ -520,6 +525,8 @@ public final class ExpressionTypeInferrer {
     private @Nullable ResolvedType inferMethodCall(@NotNull MethodCallExpression call) {
         TypeRegistry registry = classpathManager.typeRegistry();
         if (call.target() == null) {
+            ResolvedType selfResult = lookupInstanceReturn(classInternalName, call, null);
+            if (selfResult != null) return selfResult;
             if (selfMethods != null) {
                 SelfMethodInfo info = selfMethods.get(call.methodName() + ":" + call.arguments().size());
                 if (info != null) return descriptorReturnType(info.descriptor());
@@ -531,19 +538,17 @@ public final class ExpressionTypeInferrer {
             }
             String outer = enclosingOuterInternal();
             String checkOuter = outer != null ? outer : enclosingStaticOuter;
-            if (checkOuter != null && nestedClassMethods != null) {
-                Map<String, SelfMethodInfo> nm = nestedClassMethods.get(checkOuter);
-                if (nm != null) {
-                    SelfMethodInfo info = nm.get(call.methodName() + ":" + call.arguments().size());
-                    if (info != null) return descriptorReturnType(info.descriptor());
-                }
-            }
             if (checkOuter != null) {
                 ResolvedType outerResult = lookupInstanceReturn(checkOuter, call, null);
                 if (outerResult != null) return outerResult;
+                if (nestedClassMethods != null) {
+                    Map<String, SelfMethodInfo> nm = nestedClassMethods.get(checkOuter);
+                    if (nm != null) {
+                        SelfMethodInfo info = nm.get(call.methodName() + ":" + call.arguments().size());
+                        if (info != null) return descriptorReturnType(info.descriptor());
+                    }
+                }
             }
-            ResolvedType selfResult = lookupInstanceReturn(classInternalName, call, null);
-            if (selfResult != null) return selfResult;
             return lookupInstanceReturn("java/lang/Object", call, null);
         }
         ResolvedType targetType = infer(call.target());
@@ -580,7 +585,7 @@ public final class ExpressionTypeInferrer {
         MethodSymbol best = bestMethodOf(owner, call);
         if (best == null) return null;
         if (!best.isStatic()) return null;
-        return resolveReturnType(best, null);
+        return resolveReturnType(best, null, call);
     }
 
     private @Nullable ResolvedType lookupInstanceReturn(@NotNull String ownerInternal, @NotNull MethodCallExpression call, @Nullable ResolvedType receiverType) {
@@ -588,7 +593,7 @@ public final class ExpressionTypeInferrer {
         if (owner == null) return null;
         MethodSymbol best = bestMethodOf(owner, call);
         if (best == null) return null;
-        return resolveReturnType(best, receiverType);
+        return resolveReturnType(best, receiverType, call);
     }
 
     /**
@@ -598,7 +603,7 @@ public final class ExpressionTypeInferrer {
      * the call site arguments when the only mention is in a parameter
      * position.
      */
-    private @Nullable ResolvedType resolveReturnType(@NotNull MethodSymbol method, @Nullable ResolvedType receiverType) {
+    private @Nullable ResolvedType resolveReturnType(@NotNull MethodSymbol method, @Nullable ResolvedType receiverType, @Nullable MethodCallExpression call) {
         TypeRef ret = method.returnType();
         if (ret.isTypeVariable()) {
             String name = ret.typeVariableName();
@@ -608,13 +613,10 @@ public final class ExpressionTypeInferrer {
                     if (classParams.get(i).name().equals(name)) return receiverType.typeArguments().get(i);
                 }
             }
-            ResolvedType bound = bindMethodTypeVariable(method, name, null);
-            if (bound != null) return bound;
-        }
-        if (ret.arrayDimensions() > 0 && ret.isTypeVariable()) {
-            String name = ret.typeVariableName();
-            ResolvedType bound = bindMethodTypeVariableFromArrayArg(method, name);
-            if (bound != null) return bound.asArray(ret.arrayDimensions());
+            if (call != null) {
+                ResolvedType fromArgs = bindMethodTypeVariableFromCallArgs(method, name, call);
+                if (fromArgs != null) return fromArgs;
+            }
         }
         ResolvedType base = refToResolved(ret);
         if (!ret.typeArguments().isEmpty() && base.internalName() != null) {
@@ -623,6 +625,25 @@ public final class ExpressionTypeInferrer {
             base = base.withTypeArguments(args);
         }
         return base;
+    }
+
+    /**
+     * Binds a method level type variable {@code tvName} by scanning
+     * {@code method.parameterTypes()} for the first parameter declared as that
+     * type variable and inferring the corresponding call site argument's type.
+     */
+    private @Nullable ResolvedType bindMethodTypeVariableFromCallArgs(@NotNull MethodSymbol method, @Nullable String tvName, @NotNull MethodCallExpression call) {
+        if (tvName == null) return null;
+        List<TypeRef> params = method.parameterTypes();
+        List<Expression> args = call.arguments();
+        for (int i = 0; i < params.size() && i < args.size(); i++) {
+            TypeRef p = params.get(i);
+            if (p.isTypeVariable() && tvName.equals(p.typeVariableName())) {
+                ResolvedType argType = infer(args.get(i));
+                if (argType != null && argType != ResolvedType.NULL) return argType;
+            }
+        }
+        return null;
     }
 
     private @NotNull ResolvedType substituteTypeRef(@NotNull TypeRef ref, @NotNull MethodSymbol method, @Nullable ResolvedType receiverType) {
@@ -643,15 +664,6 @@ public final class ExpressionTypeInferrer {
         return base.withTypeArguments(args);
     }
 
-    private @Nullable ResolvedType bindMethodTypeVariable(@NotNull MethodSymbol method, @Nullable String tvName, @Nullable Boolean unused) {
-        if (tvName == null) return null;
-        return null;
-    }
-
-    private @Nullable ResolvedType bindMethodTypeVariableFromArrayArg(@NotNull MethodSymbol method, @Nullable String tvName) {
-        if (tvName == null) return null;
-        return null;
-    }
 
     private @Nullable ResolvedType inferFieldAccess(@NotNull FieldAccessExpression fieldAccess) {
         if ("class".equals(fieldAccess.fieldName())) return ResolvedType.ofObject("java/lang/Class");

@@ -38,18 +38,6 @@ public final class MethodResolutionHelper {
         this.exprGen = exprGen;
     }
 
-    /**
-     * Builds the {@code name:arity} key used as the entry point into the
-     * self method map without the per call {@link StringBuilder} the
-     * {@code +} operator would synthesise.
-     *
-     * @param name  method name
-     * @param arity argument count
-     * @return key string
-     */
-    public static @NotNull String selfMethodKey(@NotNull String name, int arity) {
-        return name + ':' + arity;
-    }
 
     /**
      * Resolves the matching {@code <init>} descriptor on {@code ownerInternal}
@@ -151,7 +139,7 @@ public final class MethodResolutionHelper {
     public @Nullable SelfMethodInfo resolveSelfMethod(@NotNull MethodCallExpression call) {
         MethodContext ctx = exprGen.ctx();
         Map<String, SelfMethodInfo> selfMethods = ctx.selfMethods();
-        String baseKey = selfMethodKey(call.methodName(), call.arguments().size());
+        String baseKey = call.methodName() + ':' + call.arguments().size();
         SelfMethodInfo info = selfMethods.get(baseKey);
         if (info == null) return null;
         if (!ctx.selfMethodsHasOverloads()) return info;

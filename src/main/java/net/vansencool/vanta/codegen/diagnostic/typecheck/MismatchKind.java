@@ -1,0 +1,22 @@
+package net.vansencool.vanta.codegen.diagnostic.typecheck;
+
+/**
+ * Classification of an assignment type mismatch.
+ */
+public enum MismatchKind {
+    NULL_INTO_PRIMITIVE,
+    VOID_RESULT,
+    STRING_INTO_PRIMITIVE,
+    PRIMITIVE_INTO_STRING,
+    BOXED_INTO_DIFFERENT_PRIMITIVE,
+    PRIMITIVE_INTO_INCOMPATIBLE_BOX,
+    NARROWING_PRIMITIVE,
+    FLOATING_INTO_INTEGRAL,
+    BOOLEAN_NUMERIC_MIX,
+    ARRAY_DIM_MISMATCH,
+    ARRAY_ELEMENT_INCOMPATIBLE,
+    UNRELATED_REFERENCES,
+    ENUM_MISMATCH,
+    GENERIC_PARAMETERS,
+    UNKNOWN
+}

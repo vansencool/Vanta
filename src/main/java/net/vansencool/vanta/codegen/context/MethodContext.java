@@ -2,6 +2,7 @@ package net.vansencool.vanta.codegen.context;
 
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
+import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.resolver.ExpressionTypeInferrer;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.TypeResolver;
@@ -17,6 +18,7 @@ import org.objectweb.asm.MethodVisitor;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +44,7 @@ public final class MethodContext {
     private final @NotNull List<PendingLocal> pendingLocals = new ArrayList<>();
     private final @NotNull List<Runnable> pendingFinallyEmitters = new ArrayList<>();
     private final @NotNull Deque<ResolvedType> switchExpectedStack = new ArrayDeque<>();
+    private final @NotNull Map<String, List<AstNode>> reassignedLocals = new HashMap<>();
     private int selfMethodsOverloadState;
     private boolean reachable;
     private @Nullable ClassWriter classWriter;
@@ -181,7 +184,26 @@ public final class MethodContext {
      * than the variable's first definite assignment so this is a safe over-approximation.
      */
     public @NotNull LocalVariable declareLocal(@NotNull String name, @NotNull ResolvedType type) {
-        LocalVariable lv = scope.declare(name, type);
+        return declareLocal(name, type, false, null);
+    }
+
+    /**
+     * Declares a local variable, recording the {@code isFinal} flag and
+     * originating AST node so downstream assignment checks can reject
+     * reassignment and quote the original declaration.
+     */
+    public @NotNull LocalVariable declareLocal(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, @Nullable AstNode declaration) {
+        return declareLocal(name, type, isFinal, false, declaration);
+    }
+
+    /**
+     * Declares a local variable with explicit final and initializer flags so
+     * effectively final analysis knows whether a later assignment is the
+     * variable's first initialization (allowed) or a reassignment (forbidden
+     * inside captures).
+     */
+    public @NotNull LocalVariable declareLocal(@NotNull String name, @NotNull ResolvedType type, boolean isFinal, boolean hasInitializer, @Nullable AstNode declaration) {
+        LocalVariable lv = scope.declare(name, type, isFinal, hasInitializer, declaration);
         Label start = methodStartLabel;
         if (start == null) {
             start = new Label();
@@ -190,6 +212,46 @@ public final class MethodContext {
         }
         openLocal(name, type.descriptor(), null, start, lv.index());
         return lv;
+    }
+
+    /**
+     * Records that {@code name} was reassigned at AST node {@code at}. Idempotent so
+     * calling at emit time after pre seeding does not duplicate entries.
+     */
+    public void markReassigned(@NotNull String name, @NotNull AstNode at) {
+        List<AstNode> sites = reassignedLocals.computeIfAbsent(name, k -> new ArrayList<>());
+        if (!sites.contains(at)) sites.add(at);
+    }
+
+    /**
+     * Seeds the reassigned locals map with sites found by a pre scan of the
+     * method body. Lets {@link #isEffectivelyFinal} see assignments that have
+     * not been emitted yet at a capture site.
+     */
+    public void seedReassignedLocals(@NotNull Map<String, List<AstNode>> sites) {
+        for (Map.Entry<String, List<AstNode>> e : sites.entrySet()) {
+            List<AstNode> bucket = reassignedLocals.computeIfAbsent(e.getKey(), k -> new ArrayList<>());
+            for (AstNode site : e.getValue()) if (!bucket.contains(site)) bucket.add(site);
+        }
+    }
+
+    /**
+     * @return true when {@code local} is declared final or every assignment
+     * to it satisfies JLS 16.1.7 definite unassignment (i.e. is the
+     * variable's first definite assignment), as decided by
+     * {@code EffectivelyFinalAnalyzer}.
+     */
+    public boolean isEffectivelyFinal(@NotNull LocalVariable local) {
+        if (local.isFinal()) return true;
+        return !reassignedLocals.containsKey(local.name());
+    }
+
+    /**
+     * @return AST nodes where {@code name} was reassigned, in source order; empty when never reassigned
+     */
+    public @NotNull List<AstNode> reassignmentSites(@NotNull String name) {
+        List<AstNode> list = reassignedLocals.get(name);
+        return list == null ? List.of() : list;
     }
 
     /**

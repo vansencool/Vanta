@@ -8,7 +8,7 @@ public class CompilationException extends RuntimeException {
     private final @NotNull Diagnostic diagnostic;
 
     public CompilationException(@NotNull Diagnostic diagnostic) {
-        super(diagnostic.format());
+        super(diagnostic.format(), null, false, false);
         this.diagnostic = diagnostic;
     }
 
