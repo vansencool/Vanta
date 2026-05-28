@@ -2,6 +2,7 @@ package net.vansencool.vanta.parser;
 
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
+import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.diagnostic.fix.Applicability;
 import net.vansencool.vanta.diagnostic.fix.Edit;
 import net.vansencool.vanta.diagnostic.fix.Fix;
@@ -98,6 +99,7 @@ public final class Parser {
     private int tokenCount;
     private int pos;
     private int speculativeDepth;
+    private @Nullable DiagnosticReport report;
 
     public Parser(@NotNull List<Token> tokens) {
         this(tokens, "", null, List.of());
@@ -114,6 +116,49 @@ public final class Parser {
         this.source = source;
         this.sourceFile = sourceFile;
         this.sourceComments = comments;
+    }
+
+    /**
+     * Attaches a diagnostic sink for statement level error recovery. When set,
+     * a statement that fails to parse inside a block is recorded into the
+     * report and the parser resyncs to the next {@code ;} or {@code }} so
+     * sibling statements can still be parsed.
+     */
+    public void report(@Nullable DiagnosticReport report) {
+        this.report = report;
+    }
+
+    /**
+     * Advances past tokens at the current bracket depth until one of {@code stopAt} or EOF.
+     */
+    private void skipToBalanced(@NotNull TokenType... stopAt) {
+        int brace = 0;
+        int paren = 0;
+        int bracket = 0;
+        while (!check(EOF)) {
+            TokenType t = current().type();
+            if (brace == 0 && paren == 0 && bracket == 0) {
+                for (TokenType target : stopAt) if (t == target) return;
+            }
+            if (t == LEFT_BRACE) brace++;
+            else if (t == RIGHT_BRACE) {
+                if (brace == 0) return;
+                brace--;
+            } else if (t == LEFT_PAREN) paren++;
+            else if (t == RIGHT_PAREN && paren > 0) paren--;
+            else if (t == LEFT_BRACKET) bracket++;
+            else if (t == RIGHT_BRACKET && bracket > 0) bracket--;
+            advance();
+        }
+    }
+
+    /**
+     * Routes {@code e} into the diagnostic report sink and returns true when a sink exists.
+     */
+    private boolean softFail(@NotNull CompilationException e) {
+        if (report == null) return false;
+        report.report(sourceFile, null, e.diagnostic());
+        return true;
     }
 
     private static @NotNull String tokenDisplay(@NotNull TokenType type) {
@@ -155,7 +200,14 @@ public final class Parser {
         }
         List<AstNode> typeDecls = new ArrayList<>();
         while (!check(EOF)) {
-            typeDecls.add(parseTypeDeclaration());
+            int savedPos = pos;
+            try {
+                typeDecls.add(parseTypeDeclaration());
+            } catch (CompilationException e) {
+                if (!softFail(e)) throw e;
+                if (pos == savedPos) advance();
+                skipToBalanced(CLASS, INTERFACE, ENUM, RECORD);
+            }
         }
         CommentTable commentTable = buildCommentTable(typeDecls);
         return new CompilationUnit(packageName, imports, typeDecls, commentTable, spanTable, startLine);
@@ -423,8 +475,16 @@ public final class Parser {
         List<AstNode> members = new ArrayList<>();
         if (check(SEMICOLON)) {
             advance();
-            while (!check(RIGHT_BRACE)) {
-                members.add(parseMember(name));
+            while (!check(RIGHT_BRACE) && !check(EOF)) {
+                int savedPos = pos;
+                try {
+                    members.add(parseMember(name));
+                } catch (CompilationException e) {
+                    if (!softFail(e)) throw e;
+                    if (pos == savedPos) advance();
+                    skipToBalanced(RIGHT_BRACE, SEMICOLON);
+                    if (check(SEMICOLON)) advance();
+                }
             }
         }
         expect(RIGHT_BRACE);
@@ -538,8 +598,16 @@ public final class Parser {
     private @NotNull List<AstNode> parseClassBody(@NotNull String className) {
         expect(LEFT_BRACE);
         List<AstNode> members = new ArrayList<>();
-        while (!check(RIGHT_BRACE)) {
-            members.add(parseMember(className));
+        while (!check(RIGHT_BRACE) && !check(EOF)) {
+            int savedPos = pos;
+            try {
+                members.add(parseMember(className));
+            } catch (CompilationException e) {
+                if (!softFail(e)) throw e;
+                if (pos == savedPos) advance();
+                skipToBalanced(RIGHT_BRACE, SEMICOLON);
+                if (check(SEMICOLON)) advance();
+            }
         }
         expect(RIGHT_BRACE);
         return members;
@@ -838,8 +906,16 @@ public final class Parser {
     private @NotNull List<AstNode> parseAnonymousClassBody() {
         expect(LEFT_BRACE);
         List<AstNode> members = new ArrayList<>();
-        while (!check(RIGHT_BRACE)) {
-            members.add(parseMember(""));
+        while (!check(RIGHT_BRACE) && !check(EOF)) {
+            int savedPos = pos;
+            try {
+                members.add(parseMember(""));
+            } catch (CompilationException e) {
+                if (!softFail(e)) throw e;
+                if (pos == savedPos) advance();
+                skipToBalanced(RIGHT_BRACE, SEMICOLON);
+                if (check(SEMICOLON)) advance();
+            }
         }
         expect(RIGHT_BRACE);
         return members;
@@ -1194,7 +1270,15 @@ public final class Parser {
         List<Statement> stmts = new ArrayList<>();
         while (!check(RIGHT_BRACE)) {
             if (check(EOF)) throwUnclosedBlock(openBrace);
-            stmts.add(parseStatement());
+            int savedPos = pos;
+            try {
+                stmts.add(parseStatement());
+            } catch (CompilationException e) {
+                if (!softFail(e)) throw e;
+                if (pos == savedPos) advance();
+                skipToBalanced(SEMICOLON, RIGHT_BRACE);
+                if (check(SEMICOLON)) advance();
+            }
         }
         expect(RIGHT_BRACE);
         return new BlockStatement(stmts, line);

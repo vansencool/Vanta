@@ -130,9 +130,18 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * Lexes and parses a single source file into a {@link CompilationUnit}.
      */
     public @NotNull CompilationUnit parse(@NotNull String source, @Nullable String sourceFile) {
+        return parse(source, sourceFile, null);
+    }
+
+    /**
+     * Lexes and parses a single source file with an optional parser level diagnostic sink.
+     */
+    public @NotNull CompilationUnit parse(@NotNull String source, @Nullable String sourceFile, @Nullable DiagnosticReport report) {
         Lexer lexer = new Lexer(source, sourceFile);
         List<Token> tokens = lexer.tokenize();
-        return new Parser(tokens, source, sourceFile, lexer.comments()).parse();
+        Parser parser = new Parser(tokens, source, sourceFile, lexer.comments());
+        parser.report(report);
+        return parser.parse();
     }
 
     /**
@@ -141,9 +150,16 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * order they were submitted.
      */
     public @NotNull Map<String, CompilationUnit> parseAll(@NotNull Map<String, String> sources) {
+        return parseAll(sources, null);
+    }
+
+    /**
+     * Parses a batch of source files with an optional shared diagnostic sink.
+     */
+    public @NotNull Map<String, CompilationUnit> parseAll(@NotNull Map<String, String> sources, @Nullable DiagnosticReport report) {
         Map<String, CompilationUnit> parsed = new LinkedHashMap<>(sources.size());
         for (Map.Entry<String, String> entry : sources.entrySet()) {
-            parsed.put(entry.getKey(), parse(entry.getValue(), entry.getKey()));
+            parsed.put(entry.getKey(), parse(entry.getValue(), entry.getKey(), report));
         }
         return parsed;
     }
@@ -194,7 +210,18 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * keyed by its internal name.
      */
     public @NotNull Map<String, byte[]> compile(@NotNull String source, @Nullable String sourceFile) {
-        return compile(parse(source, sourceFile), source, sourceFile, null);
+        DiagnosticReport report = new DiagnosticReport();
+        CompilationUnit cu = parse(source, sourceFile, report);
+        if (report.hasErrors()) throw new MultiCompilationException(report);
+        Map<String, byte[]> result;
+        try {
+            result = compile(cu, source, sourceFile, report);
+        } catch (CompilationException e) {
+            report.report(sourceFile, null, e.diagnostic());
+            throw new MultiCompilationException(report);
+        }
+        if (report.hasErrors()) throw new MultiCompilationException(report);
+        return result;
     }
 
     /**
@@ -205,9 +232,10 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
      * @return map from class internal name to bytecode bytes
      */
     public @NotNull Map<String, byte[]> compileAll(@NotNull Map<String, String> sources) {
-        Map<String, CompilationUnit> parsed = parseAll(sources);
-        registerSources(parsed);
         DiagnosticReport report = new DiagnosticReport();
+        Map<String, CompilationUnit> parsed = parseAll(sources, report);
+        if (report.hasErrors()) throw new MultiCompilationException(report);
+        registerSources(parsed);
         Map<String, byte[]> result = new HashMap<>();
         for (Map.Entry<String, String> entry : sources.entrySet()) {
             String path = entry.getKey();
