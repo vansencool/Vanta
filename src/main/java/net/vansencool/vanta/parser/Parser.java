@@ -1017,8 +1017,10 @@ public final class Parser {
         String name = parseQualifiedName();
         Map<String, Expression> attrs = null;
         if (check(LEFT_PAREN)) {
+            Token openParen = current();
             advance();
             if (!check(RIGHT_PAREN)) {
+                if (check(CLASS) || check(INTERFACE) || check(ENUM) || check(RECORD) || check(AT) || check(EOF)) throwUnclosedAnnotationArg(name, openParen);
                 attrs = new LinkedHashMap<>();
                 if (check(IDENTIFIER) && peek().type() == ASSIGN) {
                     do {
@@ -1033,6 +1035,7 @@ public final class Parser {
                     attrs.put("value", value);
                 }
             }
+            if (!check(RIGHT_PAREN)) throwUnclosedAnnotationArg(name, openParen);
             expect(RIGHT_PAREN);
         }
         return new AnnotationNode(name, attrs, line);
@@ -1289,6 +1292,28 @@ public final class Parser {
                     .build());
         }
 
+        if (check(ELSE)) {
+            Token tok = current();
+            String line = SourceLines.lineAt(source, tok.line());
+            int deleteEnd = tok.column() - 1 + 4;
+            while (deleteEnd < line.length() && line.charAt(deleteEnd) == ' ') deleteEnd++;
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("`else` without a matching `if`")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + 4)
+                    .label("stray `else` clause")
+                    .note("an `else` may only follow an `if` branch")
+                    .fix(new Fix(
+                            "delete the stray `else`",
+                            null,
+                            List.of(Edit.delete(tok.line(), tok.column() - 1, deleteEnd, null)),
+                            Applicability.MAYBE_INCORRECT))
+                    .build());
+        }
+
         if (isLocalVariableDeclaration()) {
             return parseLocalVariableDeclaration();
         }
@@ -1302,9 +1327,12 @@ public final class Parser {
      * @return the if statement node
      */
     private @NotNull IfStatement parseIfStatement() {
-        int line = current().line();
+        Token ifTok = current();
+        int line = ifTok.line();
         expect(IF);
+        Token openParen = current();
         expect(LEFT_PAREN);
+        if (check(RIGHT_PAREN)) throwEmptyControlCondition("if", ifTok, openParen, current());
         Expression condition = parseExpression();
         expect(RIGHT_PAREN);
         Statement thenBranch = parseStatement();
@@ -1322,9 +1350,12 @@ public final class Parser {
      * @return the while statement node
      */
     private @NotNull WhileStatement parseWhileStatement() {
-        int line = current().line();
+        Token whileTok = current();
+        int line = whileTok.line();
         expect(WHILE);
+        Token openParen = current();
         expect(LEFT_PAREN);
+        if (check(RIGHT_PAREN)) throwEmptyControlCondition("while", whileTok, openParen, current());
         Expression condition = parseExpression();
         expect(RIGHT_PAREN);
         Statement body = parseStatement();
@@ -2680,16 +2711,97 @@ public final class Parser {
         if (!check(type)) {
             if (speculativeDepth > 0) throw Backtrack.INSTANCE;
             Token tok = current();
+            if (type == SEMICOLON && (tok.type() == RIGHT_PAREN || tok.type() == RIGHT_BRACKET || tok.type() == RIGHT_BRACE)) {
+                throwStrayCloser(tok);
+            }
             throw new CompilationException(Diagnostic.builder()
                     .severity(Severity.ERROR)
                     .title("expected `" + tokenDisplay(type) + "`, found `" + tok.value() + "`")
                     .sourceFile(sourceFile)
+                    .fullSource(source)
                     .at(tok.line(), SourceLines.lineAt(source, tok.line()))
                     .highlight(tok.column() - 1, tok.column() - 1 + Math.max(1, tok.value().length()))
                     .label("expected `" + tokenDisplay(type) + "` here")
                     .build());
         }
         advance();
+    }
+
+    /**
+     * Throws a diagnostic for a stray closing bracket that has no matching
+     * opener in the current parsing context.
+     */
+    private void throwStrayCloser(@NotNull Token tok) {
+        String name = tok.type() == RIGHT_PAREN ? ")" : tok.type() == RIGHT_BRACKET ? "]" : "}";
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("stray `" + name + "` with no matching opener")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                .highlight(tok.column() - 1, tok.column())
+                .label("this `" + name + "` does not close any open `" + matchingOpener(name) + "`")
+                .note("every closing bracket must pair with an earlier opening one")
+                .fix(new Fix(
+                        "delete the stray `" + name + "`",
+                        null,
+                        List.of(Edit.delete(tok.line(), tok.column() - 1, tok.column(), null)),
+                        Applicability.MACHINE_APPLICABLE))
+                .build());
+    }
+
+    private static @NotNull String matchingOpener(@NotNull String closer) {
+        return switch (closer) {
+            case ")" -> "(";
+            case "]" -> "[";
+            case "}" -> "{";
+            default -> closer;
+        };
+    }
+
+    /**
+     * Throws when an {@code if}/{@code while} control structure has an empty
+     * condition between its parentheses.
+     */
+    private void throwEmptyControlCondition(@NotNull String keyword, @NotNull Token keywordTok, @NotNull Token openParen, @NotNull Token closeParen) {
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("`" + keyword + "` has no condition")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(keywordTok.line(), SourceLines.lineAt(source, keywordTok.line()))
+                .highlight(openParen.column() - 1, closeParen.column())
+                .label("empty `()` is not a valid `" + keyword + "` condition")
+                .note("`" + keyword + "` requires a boolean expression between the parentheses")
+                .fix(new Fix(
+                        "insert placeholder condition",
+                        null,
+                        List.of(Edit.replace(openParen.line(), openParen.column(), closeParen.column() - 1, "<condition>", "fill in the boolean expression")),
+                        Applicability.HAS_PLACEHOLDER))
+                .build());
+    }
+
+    /**
+     * Throws when an annotation argument list opens with {@code (} but never
+     * closes before the next declaration or end of file.
+     */
+    private void throwUnclosedAnnotationArg(@NotNull String name, @NotNull Token openParen) {
+        Token here = current();
+        throw new CompilationException(Diagnostic.builder()
+                .severity(Severity.ERROR)
+                .title("annotation `@" + name + "` has unclosed argument list")
+                .sourceFile(sourceFile)
+                .fullSource(source)
+                .at(openParen.line(), SourceLines.lineAt(source, openParen.line()))
+                .highlight(openParen.column() - 1, openParen.column())
+                .label("this `(` is never closed")
+                .note("annotation arguments must finish with a `)` before the next token, but the parser hit `" + (here.value().isEmpty() ? "end of file" : here.value()) + "` first")
+                .fix(new Fix(
+                        "close the annotation argument list",
+                        null,
+                        List.of(Edit.insert(openParen.line(), openParen.column(), ")", "insert `)`")),
+                        Applicability.MAYBE_INCORRECT))
+                .build());
     }
 
     /**
