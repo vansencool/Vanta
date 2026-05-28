@@ -238,7 +238,7 @@ public final class NumericCoercion {
      * needed before the store
      */
     private boolean intLiteralFitsTargetNarrow(@NotNull Expression value, @NotNull String targetDesc) {
-        Integer v = exprGen.constantEvaluator().simpleIntValue(value);
+        Integer v = exprGen.constantEvaluator().intValue(value);
         if (v == null) return false;
         int n = v;
         return switch (targetDesc) {
