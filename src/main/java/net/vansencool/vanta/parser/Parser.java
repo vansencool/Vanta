@@ -2258,12 +2258,14 @@ public final class Parser {
                     advance();
                     expr = new FieldAccessExpression(expr, "super", line);
                 } else {
+                    List<TypeNode> witness = null;
+                    if (check(LESS)) witness = parseTypeArguments();
                     Token nameTok = current();
                     String name = expectIdentifier();
                     if (check(LEFT_PAREN)) {
                         List<Expression> args = parseArguments();
                         Token receiverStart = startTokenOf(expr, nameTok);
-                        MethodCallExpression call = span(receiverStart, new MethodCallExpression(expr, name, args, null, nameTok.line()));
+                        MethodCallExpression call = span(receiverStart, new MethodCallExpression(expr, name, args, witness, nameTok.line()));
                         spanTable.recordSub(call, "methodName", new Span(nameTok.line(), nameTok.column(), nameTok.line(), nameTok.column() + name.length() - 1));
                         expr = call;
                     } else {
