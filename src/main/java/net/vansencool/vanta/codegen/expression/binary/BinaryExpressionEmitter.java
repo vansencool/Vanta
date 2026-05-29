@@ -4,6 +4,8 @@ import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.codegen.diagnostic.typecheck.BinaryOperandDiagnostic;
+import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.codegen.expression.lambda.LambdaEmitter;
 import net.vansencool.vanta.codegen.expression.util.arith.ArithmeticOpcodes;
 import net.vansencool.vanta.codegen.expression.util.cmp.ComparisonOpcodes;
@@ -14,6 +16,7 @@ import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -24,8 +27,7 @@ import java.util.List;
 /**
  * Emits bytecode for binary expressions: arithmetic, bitwise, shift,
  * comparison, reference equality, short-circuit logical ({@code &&}/{@code ||}),
- * and string concatenation via {@code invokedynamic} +
- * {@link java.lang.invoke.StringConcatFactory#makeConcatWithConstants}.
+ * and string concatenation via {@code invokedynamic StringConcatFactory.makeConcatWithConstants}.
  * Routes each operator to the right JVM opcode after numeric promotion of
  * the operands.
  */
@@ -104,6 +106,7 @@ public final class BinaryExpressionEmitter {
 
         ResolvedType leftType = ctx.typeInferrer().infer(binary.left());
         ResolvedType rightType = ctx.typeInferrer().infer(binary.right());
+        rejectBadOperands(binary, op, leftType, rightType);
         boolean isShift = "<<".equals(op) || ">>".equals(op) || ">>>".equals(op);
         String typeDesc = isShift ? (leftType != null && "J".equals(leftType.descriptor()) ? "J" : "I") : exprGen.numericCoercion().promote(leftType, rightType);
 
@@ -153,6 +156,37 @@ public final class BinaryExpressionEmitter {
             case ">>>" -> mv.visitInsn("J".equals(typeDesc) ? Opcodes.LUSHR : Opcodes.IUSHR);
             default -> throw new IllegalStateException("internal compiler error: parser produced unknown binary operator '" + op + "' at line " + binary.line());
         }
+    }
+
+    /**
+     * Rejects binary operators applied to operand types the JLS forbids.
+     */
+    private void rejectBadOperands(@NotNull BinaryExpression binary, @NotNull String op, @Nullable ResolvedType left, @Nullable ResolvedType right) {
+        if (left == null || right == null) return;
+        if (left.isPrimitive() && right.isPrimitive()) {
+            if (left == ResolvedType.BOOLEAN || right == ResolvedType.BOOLEAN) {
+                boolean ok = (left == ResolvedType.BOOLEAN && right == ResolvedType.BOOLEAN)
+                        && ("&".equals(op) || "|".equals(op) || "^".equals(op) || "==".equals(op) || "!=".equals(op));
+                if (!ok) throw new CompilationException(BinaryOperandDiagnostic.build(exprGen.ctx(), binary, left, right));
+            }
+            return;
+        }
+        if (("==".equals(op) || "!=".equals(op)) && !left.isPrimitive() && !right.isPrimitive()) return;
+        if (unboxesToNumeric(left) && unboxesToNumeric(right)) return;
+        if ("+".equals(op) && ("java/lang/String".equals(left.internalName()) || "java/lang/String".equals(right.internalName()))) return;
+        throw new CompilationException(BinaryOperandDiagnostic.build(exprGen.ctx(), binary, left, right));
+    }
+
+    /**
+     * @return true when {@code t} is a numeric primitive or a numeric wrapper class
+     */
+    private static boolean unboxesToNumeric(@NotNull ResolvedType t) {
+        if (t.isPrimitive()) return t != ResolvedType.BOOLEAN;
+        String n = t.internalName();
+        if (n == null) return false;
+        return n.equals("java/lang/Byte") || n.equals("java/lang/Short") || n.equals("java/lang/Integer")
+                || n.equals("java/lang/Long") || n.equals("java/lang/Float") || n.equals("java/lang/Double")
+                || n.equals("java/lang/Character");
     }
 
     /**

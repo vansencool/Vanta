@@ -1982,10 +1982,10 @@ public final class Parser {
     private @NotNull Expression parseOr() {
         Expression left = parseAnd();
         while (check(OR)) {
-            int line = current().line();
+            Token opTok = current();
             advance();
             Expression right = parseAnd();
-            left = new BinaryExpression(left, "||", right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, "||", right, opTok.line()));
         }
         return left;
     }
@@ -1998,10 +1998,10 @@ public final class Parser {
     private @NotNull Expression parseAnd() {
         Expression left = parseBitwiseOr();
         while (check(AND)) {
-            int line = current().line();
+            Token opTok = current();
             advance();
             Expression right = parseBitwiseOr();
-            left = new BinaryExpression(left, "&&", right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, "&&", right, opTok.line()));
         }
         return left;
     }
@@ -2014,10 +2014,10 @@ public final class Parser {
     private @NotNull Expression parseBitwiseOr() {
         Expression left = parseBitwiseXor();
         while (check(PIPE)) {
-            int line = current().line();
+            Token opTok = current();
             advance();
             Expression right = parseBitwiseXor();
-            left = new BinaryExpression(left, "|", right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, "|", right, opTok.line()));
         }
         return left;
     }
@@ -2030,10 +2030,10 @@ public final class Parser {
     private @NotNull Expression parseBitwiseXor() {
         Expression left = parseBitwiseAnd();
         while (check(CARET)) {
-            int line = current().line();
+            Token opTok = current();
             advance();
             Expression right = parseBitwiseAnd();
-            left = new BinaryExpression(left, "^", right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, "^", right, opTok.line()));
         }
         return left;
     }
@@ -2046,10 +2046,10 @@ public final class Parser {
     private @NotNull Expression parseBitwiseAnd() {
         Expression left = parseEquality();
         while (check(AMPERSAND)) {
-            int line = current().line();
+            Token opTok = current();
             advance();
             Expression right = parseEquality();
-            left = new BinaryExpression(left, "&", right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, "&", right, opTok.line()));
         }
         return left;
     }
@@ -2062,11 +2062,11 @@ public final class Parser {
     private @NotNull Expression parseEquality() {
         Expression left = parseRelational();
         while (check(EQUAL) || check(NOT_EQUAL)) {
-            int line = current().line();
-            String op = current().value();
+            Token opTok = current();
+            String op = opTok.value();
             advance();
             Expression right = parseRelational();
-            left = new BinaryExpression(left, op, right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, op, right, opTok.line()));
         }
         return left;
     }
@@ -2080,11 +2080,11 @@ public final class Parser {
         Expression left = parseShift();
         while (true) {
             if (check(LESS) || check(GREATER) || check(LESS_EQUAL) || check(GREATER_EQUAL)) {
-                int line = current().line();
-                String op = current().value();
+                Token opTok = current();
+                String op = opTok.value();
                 advance();
                 Expression right = parseShift();
-                left = new BinaryExpression(left, op, right, line);
+                left = span(startTokenOf(left, opTok), new BinaryExpression(left, op, right, opTok.line()));
             } else if (check(INSTANCEOF)) {
                 int line = current().line();
                 advance();
@@ -2110,11 +2110,11 @@ public final class Parser {
     private @NotNull Expression parseShift() {
         Expression left = parseAdditive();
         while (check(LEFT_SHIFT) || check(RIGHT_SHIFT) || check(UNSIGNED_RIGHT_SHIFT)) {
-            int line = current().line();
-            String op = current().value();
+            Token opTok = current();
+            String op = opTok.value();
             advance();
             Expression right = parseAdditive();
-            left = new BinaryExpression(left, op, right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, op, right, opTok.line()));
         }
         return left;
     }
@@ -2127,11 +2127,11 @@ public final class Parser {
     private @NotNull Expression parseAdditive() {
         Expression left = parseMultiplicative();
         while (check(PLUS) || check(MINUS)) {
-            int line = current().line();
-            String op = current().value();
+            Token opTok = current();
+            String op = opTok.value();
             advance();
             Expression right = parseMultiplicative();
-            left = new BinaryExpression(left, op, right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, op, right, opTok.line()));
         }
         return left;
     }
@@ -2144,11 +2144,11 @@ public final class Parser {
     private @NotNull Expression parseMultiplicative() {
         Expression left = parseUnary();
         while (check(STAR) || check(SLASH) || check(PERCENT)) {
-            int line = current().line();
-            String op = current().value();
+            Token opTok = current();
+            String op = opTok.value();
             advance();
             Expression right = parseUnary();
-            left = new BinaryExpression(left, op, right, line);
+            left = span(startTokenOf(left, opTok), new BinaryExpression(left, op, right, opTok.line()));
         }
         return left;
     }
