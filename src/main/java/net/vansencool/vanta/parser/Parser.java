@@ -1,5 +1,6 @@
 package net.vansencool.vanta.parser;
 
+import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
 import net.vansencool.vanta.diagnostic.Diagnostic;
 import net.vansencool.vanta.diagnostic.Severity;
 import net.vansencool.vanta.diagnostic.DiagnosticReport;
@@ -75,6 +76,7 @@ import net.vansencool.vanta.parser.ast.type.TypeParameter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -2339,6 +2341,7 @@ public final class Parser {
             case STRING_LITERAL:
             case TEXT_BLOCK, TRUE, FALSE: {
                 Token tok = current();
+                validateNumericLiteral(tok);
                 advance();
                 return span(start, new LiteralExpression(tok.type(), tok.value(), line));
             }
@@ -2865,6 +2868,82 @@ public final class Parser {
                         List.of(Edit.replace(openParen.line(), openParen.column(), closeParen.column() - 1, "<condition>", "fill in the boolean expression")),
                         Applicability.HAS_PLACEHOLDER))
                 .build());
+    }
+
+    /**
+     * Rejects numeric literals whose textual value overflows their target JVM type.
+     */
+    private void validateNumericLiteral(@NotNull Token tok) {
+        try {
+            switch (tok.type()) {
+                case INT_LITERAL -> LiteralParser.parseIntLiteral(tok.value());
+                case LONG_LITERAL -> LiteralParser.parseLongLiteral(tok.value());
+                case FLOAT_LITERAL -> Float.parseFloat(tok.value().replace("_", "").replace("f", "").replace("F", ""));
+                case DOUBLE_LITERAL -> Double.parseDouble(tok.value().replace("_", "").replace("d", "").replace("D", ""));
+                default -> {
+                }
+            }
+        } catch (NumberFormatException ex) {
+            String kind = switch (tok.type()) {
+                case INT_LITERAL -> "int";
+                case LONG_LITERAL -> "long";
+                case FLOAT_LITERAL -> "float";
+                case DOUBLE_LITERAL -> "double";
+                default -> "numeric";
+            };
+            String reason = literalProblem(tok, kind);
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title(kind + " literal `" + tok.value() + "` " + reason)
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(tok.line(), SourceLines.lineAt(source, tok.line()))
+                    .highlight(tok.column() - 1, tok.column() - 1 + tok.value().length())
+                    .label(reason)
+                    .note(rangeNote(tok.type()))
+                    .build());
+        }
+    }
+
+    /**
+     * Picks a precise reason string for a literal that failed numeric parsing.
+     */
+    private @NotNull String literalProblem(@NotNull Token tok, @NotNull String kind) {
+        String raw = tok.value().replace("_", "").toLowerCase();
+        if (raw.endsWith("l")) raw = raw.substring(0, raw.length() - 1);
+        if (raw.endsWith("f") || raw.endsWith("d")) raw = raw.substring(0, raw.length() - 1);
+        if (raw.matches("^0?[xb]?[0-9a-f.+\\-eE]+$") || raw.matches("^[0-9.+\\-eE]+$")) {
+            switch (tok.type()) {
+                case INT_LITERAL, LONG_LITERAL -> {
+                    try {
+                        new BigInteger(raw.startsWith("0x") ? raw.substring(2) : raw, raw.startsWith("0x") ? 16 : 10);
+                        return "is too large for " + kind;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                case FLOAT_LITERAL, DOUBLE_LITERAL -> {
+                    try {
+                        double d = Double.parseDouble(raw);
+                        if (Double.isInfinite(d)) return "is too large for " + kind;
+                        return "is malformed";
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+        return "is malformed";
+    }
+
+    private @NotNull String rangeNote(@NotNull TokenType type) {
+        return switch (type) {
+            case INT_LITERAL -> "int range is " + Integer.MIN_VALUE + " to " + Integer.MAX_VALUE + " (use a `L` suffix for long)";
+            case LONG_LITERAL -> "long range is " + Long.MIN_VALUE + " to " + Long.MAX_VALUE;
+            case FLOAT_LITERAL -> "float range is " + Float.MIN_VALUE + " to " + Float.MAX_VALUE + " (use `D` suffix or omit for double)";
+            case DOUBLE_LITERAL -> "double range is " + Double.MIN_VALUE + " to " + Double.MAX_VALUE;
+            default -> "value must fit the declared numeric type";
+        };
     }
 
     /**
