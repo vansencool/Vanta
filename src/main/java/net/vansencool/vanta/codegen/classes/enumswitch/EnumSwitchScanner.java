@@ -402,8 +402,12 @@ public final class EnumSwitchScanner {
             if (r != null && r.internalName() != null && isEnum(r.internalName())) return r;
         }
         if (selector instanceof NameExpression ne) {
-            String name = ne.name();
-            ResolvedType via = typeResolver.resolve(new TypeNode(name, null, 0, ne.line()));
+            String localType = lookupLocal(ne.name());
+            if (localType != null) {
+                ResolvedType rt = typeResolver.resolve(new TypeNode(localType, null, 0, ne.line()));
+                if (rt.internalName() != null && isEnum(rt.internalName())) return rt;
+            }
+            ResolvedType via = typeResolver.resolve(new TypeNode(ne.name(), null, 0, ne.line()));
             if (via.internalName() != null && isEnum(via.internalName())) return via;
         }
         if (selector instanceof FieldAccessExpression fa) {
