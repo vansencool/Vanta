@@ -251,10 +251,13 @@ public final class BinaryExpressionEmitter {
         boolean dynamic = false;
 
         for (Expression part : parts) {
+            String constString = exprGen.constantEvaluator().stringConstant(part);
             if (part instanceof LiteralExpression lit && lit.literalType() == TokenType.STRING_LITERAL) {
                 recipe.append(LiteralParser.stripStringQuotes(lit.value()));
             } else if (part instanceof LiteralExpression lit && lit.literalType() == TokenType.CHAR_LITERAL) {
                 recipe.append(LiteralParser.parseCharLiteral(lit.value()));
+            } else if (constString != null) {
+                recipe.append(constString);
             } else {
                 dynamic = true;
                 exprGen.generate(part);

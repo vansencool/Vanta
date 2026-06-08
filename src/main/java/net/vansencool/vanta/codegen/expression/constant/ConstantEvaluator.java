@@ -139,6 +139,14 @@ public final class ConstantEvaluator {
         return field != null ? field.constantValue() : null;
     }
 
+    /**
+     * @return compile time String value of {@code expr}, or null when not a String constant
+     */
+    public @Nullable String stringConstant(@NotNull Expression expr) {
+        Object v = staticFinalValue(expr);
+        return v instanceof String s ? s : null;
+    }
+
     public @Nullable Integer simpleIntValue(@NotNull Expression value) {
         Expression e = value;
         while (e instanceof ParenExpression p) e = p.expression();
