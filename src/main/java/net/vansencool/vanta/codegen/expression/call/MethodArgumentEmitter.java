@@ -193,10 +193,19 @@ public final class MethodArgumentEmitter {
             }
         } else if (paramType != null) {
             argExpected = ResolvedType.fromDescriptor(paramType.getDescriptor());
+            if (genericParam instanceof TypeVariable<?> tv) {
+                ResolvedType narrowed = buildReceiverTypeVarMap().get(tv.getName());
+                if (narrowed != null && narrowed.internalName() != null) argExpected = narrowed;
+            }
         } else {
             argExpected = null;
         }
-        exprGen.generate(arg, argExpected);
+        boolean argIsParameterized = genericParam instanceof TypeVariable<?> || genericParam instanceof ParameterizedType;
+        if (argIsParameterized) {
+            exprGen.generate(arg, argExpected);
+        } else {
+            exprGen.generateForAssign(arg, argExpected);
+        }
         if (paramType != null) {
             ResolvedType argType = ctx.typeInferrer().infer(arg);
             String paramDesc = paramType.getDescriptor();

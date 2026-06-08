@@ -97,6 +97,7 @@ public final class ExpressionGenerator {
     private int discardDepth = 0;
     private @Nullable String lastCheckcastType = null;
     private @Nullable ResolvedType currentExpected = null;
+    private boolean expectedFromAssign = false;
     private @Nullable String lastEmittedAnonInternal = null;
     private @Nullable ResolvedType currentReceiverType;
     private boolean suppressGenericReturnCheckcast = false;
@@ -304,6 +305,25 @@ public final class ExpressionGenerator {
             generateInner(expr, expected);
         } finally {
             currentExpected = prevExpected;
+        }
+    }
+
+    /**
+     * Same as {@link #generate(Expression, ResolvedType)} but marks the
+     * expected slot as an assignment target rather than a method argument.
+     * Lets downstream emit decisions distinguish a {@code PUTFIELD Object} sink
+     * from a {@code List.add(Object)} sink.
+     */
+    public void generateForAssign(@NotNull Expression expr, @Nullable ResolvedType expected) {
+        ResolvedType prevExpected = currentExpected;
+        boolean prevAssign = expectedFromAssign;
+        currentExpected = expected;
+        expectedFromAssign = true;
+        try {
+            generateInner(expr, expected);
+        } finally {
+            currentExpected = prevExpected;
+            expectedFromAssign = prevAssign;
         }
     }
 
@@ -643,7 +663,7 @@ public final class ExpressionGenerator {
             unboxingEmitter.emit(ctx.mv(), inferred.descriptor());
             return;
         }
-        if (currentExpected != null && "java/lang/Object".equals(currentExpected.internalName())) return;
+        if (expectedFromAssign && currentExpected != null && "java/lang/Object".equals(currentExpected.internalName())) return;
         String inferredDesc = inferred.descriptor();
         if (inferredDesc.indexOf('?') >= 0) return;
         if (inferredDesc.startsWith("[")) {

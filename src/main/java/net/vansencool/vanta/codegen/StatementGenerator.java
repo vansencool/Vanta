@@ -193,7 +193,7 @@ public final class StatementGenerator {
                             : !("F".equals(d) || "D".equals(d)) && exprGen.constantEvaluator().intValue(declarator.initializer()) != null;
                     if (inlinable) continue;
                 }
-                exprGen.generate(declarator.initializer(), resolvedType);
+                exprGen.generateForAssign(declarator.initializer(), resolvedType);
                 boolean initIsNull = initType == ResolvedType.NULL;
                 boolean literalCoerced = declarator.initializer() instanceof LiteralExpression lit && exprGen.litHandledExpectedType(lit, resolvedType.descriptor());
                 boolean descriptorsDiffer = initType != null && !resolvedType.descriptor().equals(initType.descriptor());
@@ -232,7 +232,7 @@ public final class StatementGenerator {
             if (expected != null && !TypeCompatibility.assignable(exprGen, expected, actual, ret.value())) {
                 throw new CompilationException(ReturnTypeDiagnostic.build(ctx, exprGen, ret, ret.value(), expected, actual));
             }
-            exprGen.generate(ret.value(), ctx.returnType());
+            exprGen.generateForAssign(ret.value(), ctx.returnType());
             ResolvedType type = ctx.typeInferrer().infer(ret.value());
             ResolvedType methodReturn = ctx.returnType();
             boolean valueAlreadyCoerced = ret.value() instanceof TernaryExpression

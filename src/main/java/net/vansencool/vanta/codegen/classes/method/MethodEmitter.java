@@ -595,7 +595,7 @@ public final class MethodEmitter {
                             effectiveType = effectiveType.withExtraDimensions(declarator.extraArrayDimensions());
                         ResolvedType fieldResolved = owner.typeResolver().resolve(effectiveType);
                         mv.visitVarInsn(Opcodes.ALOAD, 0);
-                        exprGen.generate(declarator.initializer(), fieldResolved);
+                        exprGen.generateForAssign(declarator.initializer(), fieldResolved);
                         exprGen.numericCoercion().adaptForStore(fieldResolved, declarator.initializer());
                         mv.visitFieldInsn(Opcodes.PUTFIELD, internalName, declarator.name(), fieldResolved.descriptor());
                     }

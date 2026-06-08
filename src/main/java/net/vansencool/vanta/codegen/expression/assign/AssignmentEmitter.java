@@ -153,7 +153,7 @@ public final class AssignmentEmitter {
             exprGen.generate(arrayAccess.array());
             exprGen.generate(arrayAccess.index());
             if ("=".equals(assignment.operator())) {
-                exprGen.generate(assignment.value(), elemType);
+                exprGen.generateForAssign(assignment.value(), elemType);
                 if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
             } else {
                 ctx.mv().visitInsn(Opcodes.DUP2);
@@ -184,7 +184,7 @@ public final class AssignmentEmitter {
                 if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
-                    exprGen.generate(assignment.value(), local.type());
+                    exprGen.generateForAssign(assignment.value(), local.type());
                     exprGen.numericCoercion().adaptForStore(local.type(), assignment.value());
                 } else if (tryEmitIinc(assignment.operator(), local, assignment.value())) {
                     return;
@@ -213,7 +213,7 @@ public final class AssignmentEmitter {
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
                         if (fieldType != null) checkAssignable(assignment, "field '" + nameExpr.name() + "'", fieldType, assignment.value());
-                        exprGen.generate(assignment.value(), fieldType);
+                        exprGen.generateForAssign(assignment.value(), fieldType);
                         if (fieldType != null) exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                     }
                     ctx.mv().visitFieldInsn(Opcodes.PUTFIELD, ctx.classInternalName(), nameExpr.name(), fieldDesc);
@@ -226,7 +226,7 @@ public final class AssignmentEmitter {
                         NumericCoercion.emitNarrowForSubIntDesc(ctx.mv(), fieldDesc);
                     } else {
                         if (fieldType != null) checkAssignable(assignment, "static field '" + nameExpr.name() + "'", fieldType, assignment.value());
-                        exprGen.generate(assignment.value(), fieldType);
+                        exprGen.generateForAssign(assignment.value(), fieldType);
                         if (fieldType != null) exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                     }
                     ctx.mv().visitFieldInsn(Opcodes.PUTSTATIC, ctx.classInternalName(), nameExpr.name(), fieldDesc);
@@ -240,7 +240,7 @@ public final class AssignmentEmitter {
                 ResolvedType fieldType = ResolvedType.fromDescriptor(fieldDesc);
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "static field '" + fieldOwner.replace('/', '.') + "." + staticResolved.name() + "'", fieldType, assignment.value());
-                    exprGen.generate(assignment.value(), fieldType);
+                    exprGen.generateForAssign(assignment.value(), fieldType);
                     exprGen.numericCoercion().adaptForStore(fieldType, assignment.value());
                 } else {
                     ctx.mv().visitFieldInsn(Opcodes.GETSTATIC, fieldOwner, staticResolved.name(), fieldDesc);
@@ -260,7 +260,7 @@ public final class AssignmentEmitter {
                 if ("=".equals(assignment.operator()) && targetType != null) checkAssignable(assignment, "field '" + fieldAccess.fieldName() + "' on " + fieldOwner.replace('/', '.'), targetType, assignment.value());
                 exprGen.generate(fieldAccess.target());
                 if ("=".equals(assignment.operator())) {
-                    exprGen.generate(assignment.value(), targetType);
+                    exprGen.generateForAssign(assignment.value(), targetType);
                     if (targetType != null) exprGen.numericCoercion().adaptForStore(targetType, assignment.value());
                 } else {
                     ctx.mv().visitInsn(Opcodes.DUP);
@@ -278,7 +278,7 @@ public final class AssignmentEmitter {
             if ("=".equals(assignment.operator())) {
                 exprGen.generate(arrayAccess.array());
                 exprGen.generate(arrayAccess.index());
-                exprGen.generate(assignment.value(), elemType);
+                exprGen.generateForAssign(assignment.value(), elemType);
                 if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
             } else {
                 exprGen.generate(arrayAccess.array());

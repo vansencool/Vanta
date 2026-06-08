@@ -7,43 +7,63 @@ import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.util.Map;
+
 /**
  * Emits the {@code CHECKCAST} + wrapper-to-primitive unboxing sequence used
  * whenever a value on the stack needs to reach a primitive slot from a
- * reference slot. Skips the {@code CHECKCAST} when the most-recently emitted
- * cast already covers the wrapper, so redundant casts don't compound.
+ * reference slot.
  */
 public final class UnboxingEmitter {
 
+    private static final Map<String, UnboxRecipe> BY_TARGET = Map.of(
+            "I", new UnboxRecipe("java/lang/Integer", "intValue", "()I"),
+            "J", new UnboxRecipe("java/lang/Long", "longValue", "()J"),
+            "F", new UnboxRecipe("java/lang/Float", "floatValue", "()F"),
+            "D", new UnboxRecipe("java/lang/Double", "doubleValue", "()D"),
+            "Z", new UnboxRecipe("java/lang/Boolean", "booleanValue", "()Z"),
+            "B", new UnboxRecipe("java/lang/Byte", "byteValue", "()B"),
+            "C", new UnboxRecipe("java/lang/Character", "charValue", "()C"),
+            "S", new UnboxRecipe("java/lang/Short", "shortValue", "()S")
+    );
+
+    private static final Map<String, UnboxRecipe> WIDENS_TO_INT = Map.of(
+            "java/lang/Byte", BY_TARGET.get("B"),
+            "java/lang/Short", BY_TARGET.get("S"),
+            "java/lang/Character", BY_TARGET.get("C")
+    );
+
     private final @NotNull ExpressionGenerator exprGen;
 
-    /**
-     * @param exprGen owning expression generator used for last-cast tracking
-     *                and wrapper-class lookups
-     */
     public UnboxingEmitter(@NotNull ExpressionGenerator exprGen) {
         this.exprGen = exprGen;
     }
 
     /**
+     * Picks the wrapper, method, and descriptor for {@code targetPrimitive}.
+     * For an {@code int} target whose source is {@code Byte}/{@code Short}/
+     * {@code Character}, picks that wrapper's own unbox so the sub int result
+     * widens to int on the JVM stack naturally.
+     */
+    private static @Nullable UnboxRecipe pickRecipe(@NotNull String targetPrimitive, @Nullable String sourceInternal) {
+        if ("I".equals(targetPrimitive)) {
+            UnboxRecipe forSource = WIDENS_TO_INT.get(sourceInternal);
+            if (forSource != null) return forSource;
+        }
+        return BY_TARGET.get(targetPrimitive);
+    }
+
+    /**
      * Emits the unboxing call for {@code targetPrimitive}, first narrowing the
-     * reference to {@code wrapperInternal} if the current stack type hasn't
-     * already been checkcast to it. When {@code wrapperInternal} is overly
-     * generic ({@code Object}/{@code Number}/wildcard), substitutes the
-     * primitive's specific wrapper.
-     *
-     * @param mv              method visitor to emit into
-     * @param targetPrimitive target primitive descriptor
-     * @param wrapperInternal declared wrapper internal name to unbox through
+     * reference to {@code wrapperInternal} when the current stack type hasn't
+     * already been checkcast to it.
      */
     public void withCast(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @NotNull String wrapperInternal) {
         withCast(mv, targetPrimitive, wrapperInternal, null);
     }
 
     /**
-     * @param operandActual already known static type of the operand on the
-     *                      stack; when this matches {@code wrapperInternal}
-     *                      the {@code CHECKCAST} is elided
+     * @param operandActual already known static type of the operand on the stack
      */
     public void withCast(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @NotNull String wrapperInternal, @Nullable String operandActual) {
         if ("java/lang/Object".equals(wrapperInternal) || "java/lang/Number".equals(wrapperInternal) || wrapperInternal.contains("?")) {
@@ -55,31 +75,15 @@ public final class UnboxingEmitter {
         if (!alreadyTyped && !checkcastEmitted) {
             mv.visitTypeInsn(Opcodes.CHECKCAST, wrapperInternal);
         }
-        String method = switch (targetPrimitive) {
-            case "I" -> "intValue";
-            case "J" -> "longValue";
-            case "F" -> "floatValue";
-            case "D" -> "doubleValue";
-            case "Z" -> "booleanValue";
-            case "B" -> "byteValue";
-            case "C" -> "charValue";
-            case "S" -> "shortValue";
-            default -> null;
-        };
-        if (method != null)
-            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, wrapperInternal, method, "()" + targetPrimitive, false);
+        UnboxRecipe recipe = BY_TARGET.get(targetPrimitive);
+        if (recipe != null) {
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, wrapperInternal, recipe.method, recipe.descriptor, false);
+        }
     }
 
     /**
      * Emits the unboxing sequence when a {@code return} expression produced a
-     * boxed wrapper but the method signature demands a primitive result. Uses
-     * the actual source type's wrapper class when known (so {@code Character}
-     * unboxes via {@code charValue}) and falls back to the target primitive's
-     * wrapper when the source is raw {@code Object}.
-     *
-     * @param mv     method visitor to emit into
-     * @param source source type currently on the stack
-     * @param target target primitive type the method returns
+     * boxed wrapper but the method signature demands a primitive result.
      */
     public void forReturn(@NotNull MethodVisitor mv, @NotNull ResolvedType source, @NotNull ResolvedType target) {
         String wrapper = source.internalName();
@@ -95,10 +99,7 @@ public final class UnboxingEmitter {
     }
 
     /**
-     * Convenience overload that unboxes without caller-declared source.
-     *
-     * @param mv              method visitor to emit into
-     * @param targetPrimitive target primitive descriptor
+     * Convenience overload that unboxes without a caller declared source.
      */
     public void emit(@NotNull MethodVisitor mv, @NotNull String targetPrimitive) {
         emit(mv, targetPrimitive, null);
@@ -107,54 +108,17 @@ public final class UnboxingEmitter {
     /**
      * Emits the wrapper-to-primitive call directly, narrowing via
      * {@code CHECKCAST} when the declared source doesn't already match the
-     * wrapper.
-     *
-     * @param mv              method visitor to emit into
-     * @param targetPrimitive target primitive descriptor
-     * @param sourceInternal  declared source wrapper internal name, or null
+     * picked wrapper.
      */
     public void emit(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @Nullable String sourceInternal) {
-        switch (targetPrimitive) {
-            case "I" -> {
-                if (!"java/lang/Integer".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Integer") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Integer"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Integer");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Integer", "intValue", "()I", false);
-            }
-            case "J" -> {
-                if (!"java/lang/Long".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Long") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Long"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Long");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Long", "longValue", "()J", false);
-            }
-            case "F" -> {
-                if (!"java/lang/Float".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Float") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Float"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Float");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Float", "floatValue", "()F", false);
-            }
-            case "D" -> {
-                if (!"java/lang/Double".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Double") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Double"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Double");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Double", "doubleValue", "()D", false);
-            }
-            case "Z" -> {
-                if (!"java/lang/Boolean".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Boolean"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Boolean");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Boolean", "booleanValue", "()Z", false);
-            }
-            case "B" -> {
-                if (!"java/lang/Byte".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Byte"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Byte");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Byte", "byteValue", "()B", false);
-            }
-            case "C" -> {
-                if (!"java/lang/Character".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Character"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Character");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Character", "charValue", "()C", false);
-            }
-            case "S" -> {
-                if (!"java/lang/Short".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Short"))
-                    mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Short");
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Short", "shortValue", "()S", false);
-            }
+        UnboxRecipe recipe = pickRecipe(targetPrimitive, sourceInternal);
+        if (recipe == null) return;
+        if (!recipe.wrapper.equals(sourceInternal) && !exprGen.lastEmittedCheckcast(recipe.wrapper) && !exprGen.ctx().stackTracker().topIsExactly(recipe.wrapper)) {
+            mv.visitTypeInsn(Opcodes.CHECKCAST, recipe.wrapper);
         }
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, recipe.wrapper, recipe.method, recipe.descriptor, false);
+    }
+
+    private record UnboxRecipe(@NotNull String wrapper, @NotNull String method, @NotNull String descriptor) {
     }
 }

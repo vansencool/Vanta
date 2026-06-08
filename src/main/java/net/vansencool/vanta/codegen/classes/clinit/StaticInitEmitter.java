@@ -167,7 +167,7 @@ public final class StaticInitEmitter {
                         effectiveType = effectiveType.withExtraDimensions(declarator.extraArrayDimensions());
                     }
                     ResolvedType resolved = owner.typeResolver().resolve(effectiveType);
-                    rig.exprGen.generate(declarator.initializer(), resolved);
+                    rig.exprGen.generateForAssign(declarator.initializer(), resolved);
                     rig.exprGen.numericCoercion().adaptForStore(resolved, declarator.initializer());
                     buffer.visitFieldInsn(Opcodes.PUTSTATIC, internalName, declarator.name(), resolved.descriptor());
                 }

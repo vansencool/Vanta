@@ -52,11 +52,12 @@ public final class ConditionEmitter {
             switch (op) {
                 case "==", "!=", "<", "<=", ">", ">=" -> {
                     if (("==".equals(op) || "!=".equals(op)) && (LiteralPredicates.isNullLiteral(binary.left()) || LiteralPredicates.isNullLiteral(binary.right()))) {
-                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
+                        exprGen.generateForAssign(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
                         mv.visitJumpInsn("==".equals(op) ? Opcodes.IFNONNULL : Opcodes.IFNULL, falseLabel);
                     } else if (("==".equals(op) || "!=".equals(op)) && exprGen.isReferenceType(binary.left()) && exprGen.isReferenceType(binary.right())) {
-                        exprGen.generate(binary.left());
-                        exprGen.generate(binary.right());
+                        ResolvedType anyRef = ResolvedType.ofObject("java/lang/Object");
+                        exprGen.generateForAssign(binary.left(), anyRef);
+                        exprGen.generateForAssign(binary.right(), anyRef);
                         mv.visitJumpInsn("==".equals(op) ? Opcodes.IF_ACMPNE : Opcodes.IF_ACMPEQ, falseLabel);
                     } else {
                         ResolvedType lt = ctx.typeInferrer().infer(binary.left());
@@ -147,7 +148,7 @@ public final class ConditionEmitter {
             switch (op) {
                 case "==", "!=", "<", "<=", ">", ">=" -> {
                     if (("==".equals(op) || "!=".equals(op)) && (LiteralPredicates.isNullLiteral(binary.left()) || LiteralPredicates.isNullLiteral(binary.right()))) {
-                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
+                        exprGen.generateForAssign(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
                         mv.visitJumpInsn("==".equals(op) ? Opcodes.IFNULL : Opcodes.IFNONNULL, trueLabel);
                     } else if (("==".equals(op) || "!=".equals(op)) && exprGen.isReferenceType(binary.left()) && exprGen.isReferenceType(binary.right())) {
                         exprGen.generate(binary.left());
@@ -236,7 +237,7 @@ public final class ConditionEmitter {
      */
     public void emitInstanceof(@NotNull InstanceofExpression instanceOf) {
         MethodContext ctx = exprGen.ctx();
-        exprGen.generate(instanceOf.expression());
+        exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
         String internalName = ctx.typeResolver().resolveInternalName(instanceOf.type());
         ctx.mv().visitTypeInsn(Opcodes.INSTANCEOF, internalName);
 
@@ -247,7 +248,7 @@ public final class ConditionEmitter {
             Label endLabel = new Label();
             mv.visitJumpInsn(Opcodes.IFEQ, falseLabel);
 
-            exprGen.generate(instanceOf.expression());
+            exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
             mv.visitTypeInsn(Opcodes.CHECKCAST, internalName);
             ResolvedType patternType = ResolvedType.ofObject(internalName);
             LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
@@ -279,15 +280,15 @@ public final class ConditionEmitter {
         LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
         Expression expr = exprGen.unwrapParens(instanceOf.expression());
         if (expr instanceof NameExpression name && ctx.scope().resolve(name.name()) != null) {
-            exprGen.generate(instanceOf.expression());
+            exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
             mv.visitTypeInsn(Opcodes.INSTANCEOF, internalName);
             mv.visitJumpInsn(Opcodes.IFEQ, jumpFalse);
-            exprGen.generate(instanceOf.expression());
+            exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
             mv.visitTypeInsn(Opcodes.CHECKCAST, internalName);
             mv.visitVarInsn(Opcodes.ASTORE, patternVar.index());
             return;
         }
-        exprGen.generate(instanceOf.expression());
+        exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
         ResolvedType exprType = ctx.typeInferrer().infer(instanceOf.expression());
         ResolvedType tempType = exprType != null ? exprType : ResolvedType.ofObject("java/lang/Object");
         LocalVariable tempVar = ctx.declareLocal("$pattmp" + ctx.scope().nextLocalIndex(), tempType);
@@ -320,18 +321,18 @@ public final class ConditionEmitter {
         LocalVariable patternVar = ctx.declarePatternLocal(instanceOf.patternVariable(), patternType);
         Expression expr = exprGen.unwrapParens(instanceOf.expression());
         if (expr instanceof NameExpression name && ctx.scope().resolve(name.name()) != null) {
-            exprGen.generate(instanceOf.expression());
+            exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
             mv.visitTypeInsn(Opcodes.INSTANCEOF, internalName);
             Label falseLabel = new Label();
             mv.visitJumpInsn(Opcodes.IFEQ, falseLabel);
-            exprGen.generate(instanceOf.expression());
+            exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
             mv.visitTypeInsn(Opcodes.CHECKCAST, internalName);
             mv.visitVarInsn(Opcodes.ASTORE, patternVar.index());
             mv.visitJumpInsn(Opcodes.GOTO, jumpTrue);
             mv.visitLabel(falseLabel);
             return;
         }
-        exprGen.generate(instanceOf.expression());
+        exprGen.generateForAssign(instanceOf.expression(), ResolvedType.ofObject("java/lang/Object"));
         ResolvedType exprType = ctx.typeInferrer().infer(instanceOf.expression());
         ResolvedType tempType = exprType != null ? exprType : ResolvedType.ofObject("java/lang/Object");
         LocalVariable tempVar = ctx.declareLocal("$pattmp" + ctx.scope().nextLocalIndex(), tempType);

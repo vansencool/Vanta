@@ -89,17 +89,18 @@ public final class BinaryExpressionEmitter {
             if (isNull) {
                 ResolvedType anyRef = ResolvedType.ofObject("java/lang/Object");
                 if (LiteralPredicates.isNullLiteral(binary.left())) {
-                    exprGen.generate(binary.right(), anyRef);
+                    exprGen.generateForAssign(binary.right(), anyRef);
                 } else {
-                    exprGen.generate(binary.left(), anyRef);
+                    exprGen.generateForAssign(binary.left(), anyRef);
                 }
                 exprGen.numericCoercion().intComparison("==".equals(op) ? Opcodes.IFNULL : Opcodes.IFNONNULL);
                 return;
             }
             boolean isRef = exprGen.isReferenceType(binary.left()) && exprGen.isReferenceType(binary.right());
             if (isRef) {
-                exprGen.generate(binary.left());
-                exprGen.generate(binary.right());
+                ResolvedType anyRef = ResolvedType.ofObject("java/lang/Object");
+                exprGen.generateForAssign(binary.left(), anyRef);
+                exprGen.generateForAssign(binary.right(), anyRef);
                 exprGen.numericCoercion().intComparison("==".equals(op) ? Opcodes.IF_ACMPEQ : Opcodes.IF_ACMPNE);
                 return;
             }
