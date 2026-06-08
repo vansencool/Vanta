@@ -57,6 +57,8 @@ public final class ResourceCloseEmitter {
      * @param primaryExSlot            local slot holding the primary exception
      */
     public void emitCloseWithSuppressed(@NotNull MethodVisitor mv, int @NotNull [] resourceSlots, @NotNull String @NotNull [] resourceOwners, boolean @NotNull [] resourceOwnerIsInterface, int primaryExSlot) {
+        int caughtSlot = ctx.scope().nextLocalIndex();
+        ctx.scope().syncNextLocalIndex(caughtSlot + 1);
         for (int i = resourceSlots.length - 1; i >= 0; i--) {
             Label skipClose = new Label();
             Label closeStart = new Label();
@@ -73,8 +75,9 @@ public final class ResourceCloseEmitter {
             mv.visitLabel(closeEnd);
             mv.visitJumpInsn(Opcodes.GOTO, afterClose);
             mv.visitLabel(closeCatch);
+            mv.visitVarInsn(Opcodes.ASTORE, caughtSlot);
             mv.visitVarInsn(Opcodes.ALOAD, primaryExSlot);
-            mv.visitInsn(Opcodes.SWAP);
+            mv.visitVarInsn(Opcodes.ALOAD, caughtSlot);
             mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Throwable", "addSuppressed", "(Ljava/lang/Throwable;)V", false);
             mv.visitLabel(afterClose);
             mv.visitLabel(skipClose);
