@@ -780,12 +780,33 @@ public final class Parser {
 
         BlockStatement body = null;
         if (check(LEFT_BRACE)) {
-            body = parseBlock();
+            Token openBrace = current();
+            try {
+                body = parseBlock();
+            } catch (CompilationException e) {
+                if (!softFail(e)) throw e;
+                skipPastMatchingBrace(openBrace);
+                body = new BlockStatement(List.of(), openBrace.line());
+            }
         } else {
             expect(SEMICOLON);
         }
 
         return new MethodDeclaration(name, modifiers, returnType, typeParameters, params, body, defaultValue, annotations, isVarargs, line);
+    }
+
+    /**
+     * Skips tokens until the matching {@code }} that closes {@code openBrace}.
+     */
+    private void skipPastMatchingBrace(@NotNull Token openBrace) {
+        int depth = 1;
+        while (!check(EOF) && depth > 0) {
+            if (check(LEFT_BRACE)) depth++;
+            else if (check(RIGHT_BRACE)) depth--;
+            if (depth == 0) break;
+            advance();
+        }
+        if (check(RIGHT_BRACE)) advance();
     }
 
     /**
