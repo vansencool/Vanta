@@ -262,9 +262,11 @@ public final class BinaryExpressionEmitter {
                 ResolvedType type = ctx.typeInferrer().infer(part);
                 if (type == null || (type.internalName() != null && "java/lang/String".equals(type.internalName()))) {
                     descriptor.append("Ljava/lang/String;");
+                } else if (type.isPrimitive()) {
+                    descriptor.append(type.descriptor());
                 } else {
-                    String d = type.descriptor();
-                    descriptor.append(LambdaEmitter.isValidDescriptor(d) ? d : "Ljava/lang/Object;");
+                    ctx.mv().visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;", false);
+                    descriptor.append("Ljava/lang/String;");
                 }
             }
         }
