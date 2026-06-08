@@ -660,6 +660,7 @@ public final class ExpressionGenerator {
         if (rawInternal.equals(inferred.internalName())) return;
         if ("java/lang/Object".equals(inferred.internalName())) return;
         if (!genericRetWidens(rawInternal, inferred.internalName())) return;
+        if (ctx.stackTracker().topIsExactly(inferred.internalName())) return;
         ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, inferred.internalName());
         lastCheckcastType = inferred.internalName();
     }

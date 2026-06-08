@@ -17,7 +17,7 @@ Vanta compiles standard Java source code directly to `.class` bytecode, serving 
 >
 > Self-compilation works end-to-end. Vanta compiles its own source and the output runs correctly.
 >
-> Remaining diffs vs javac are ~99% cosmetic (label numbering, slot ordering, synthetic layout) with no runtime impact. A small handful of real semantic diffs remain, mostly around generic `CHECKCAST` preservation on deeply nested parameterized types.
+> Remaining diffs vs javac are cosmetic only (label numbering, slot ordering, synthetic layout) with no runtime impact.
 >
 > Documentation is in progress.
 
@@ -206,9 +206,6 @@ Benchmark results via JMH on modern hardware.
 These features are either partially implemented or not started.
 
 - **Byte-for-byte parity with javac** - bytecode is semantically identical in many cases and runs the same, but label numbering, local slot ordering, and synthetic class layout differ. No runtime impact.
-- **Generic type tracking** - some collection element types (e.g. `Map<K,V>.get` returning `V` inside a nested call chain) are not always propagated, so the resulting `CHECKCAST` or unbox can land on the erased type instead of the parameterized one.
-- **String `switch`** - not emitted as the hash-based pattern javac uses.
-- **Compile-time constant inlining** - `static final` primitive/String constants are not always inlined like javac does.
 
 ---
 

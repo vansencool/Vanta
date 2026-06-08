@@ -64,7 +64,7 @@ public final class UnaryExpressionEmitter {
                         String unboxedDesc = desc;
                         if (prim != null) {
                             wrapper = desc.substring(1, desc.length() - 1);
-                            exprGen.unboxingEmitter().withCast(mv, prim, wrapper);
+                            exprGen.unboxingEmitter().withCast(mv, prim, wrapper, operandType != null ? operandType.internalName() : null);
                             unboxedDesc = prim;
                         }
                         mv.visitInsn(switch (unboxedDesc) {
@@ -93,7 +93,7 @@ public final class UnaryExpressionEmitter {
                         String wrapper = null;
                         if (prim != null) {
                             wrapper = desc.substring(1, desc.length() - 1);
-                            exprGen.unboxingEmitter().withCast(mv, prim, wrapper);
+                            exprGen.unboxingEmitter().withCast(mv, prim, wrapper, operandType != null ? operandType.internalName() : null);
                         }
                         if (isLong) {
                             mv.visitLdcInsn(-1L);

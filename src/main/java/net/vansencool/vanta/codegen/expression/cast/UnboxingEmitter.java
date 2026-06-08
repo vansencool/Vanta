@@ -37,11 +37,22 @@ public final class UnboxingEmitter {
      * @param wrapperInternal declared wrapper internal name to unbox through
      */
     public void withCast(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @NotNull String wrapperInternal) {
+        withCast(mv, targetPrimitive, wrapperInternal, null);
+    }
+
+    /**
+     * @param operandActual already known static type of the operand on the
+     *                      stack; when this matches {@code wrapperInternal}
+     *                      the {@code CHECKCAST} is elided
+     */
+    public void withCast(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @NotNull String wrapperInternal, @Nullable String operandActual) {
         if ("java/lang/Object".equals(wrapperInternal) || "java/lang/Number".equals(wrapperInternal) || wrapperInternal.contains("?")) {
             String specific = exprGen.numericCoercion().wrapperInternalName(targetPrimitive);
             if (specific != null) wrapperInternal = specific;
         }
-        if (!exprGen.lastEmittedCheckcast(wrapperInternal)) {
+        boolean alreadyTyped = wrapperInternal.equals(operandActual) || exprGen.ctx().stackTracker().topIsExactly(wrapperInternal);
+        boolean checkcastEmitted = exprGen.lastEmittedCheckcast(wrapperInternal);
+        if (!alreadyTyped && !checkcastEmitted) {
             mv.visitTypeInsn(Opcodes.CHECKCAST, wrapperInternal);
         }
         String method = switch (targetPrimitive) {
@@ -105,22 +116,22 @@ public final class UnboxingEmitter {
     public void emit(@NotNull MethodVisitor mv, @NotNull String targetPrimitive, @Nullable String sourceInternal) {
         switch (targetPrimitive) {
             case "I" -> {
-                if (!"java/lang/Integer".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Integer"))
+                if (!"java/lang/Integer".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Integer") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Integer"))
                     mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Integer");
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Integer", "intValue", "()I", false);
             }
             case "J" -> {
-                if (!"java/lang/Long".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Long"))
+                if (!"java/lang/Long".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Long") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Long"))
                     mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Long");
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Long", "longValue", "()J", false);
             }
             case "F" -> {
-                if (!"java/lang/Float".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Float"))
+                if (!"java/lang/Float".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Float") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Float"))
                     mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Float");
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Float", "floatValue", "()F", false);
             }
             case "D" -> {
-                if (!"java/lang/Double".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Double"))
+                if (!"java/lang/Double".equals(sourceInternal) && !exprGen.lastEmittedCheckcast("java/lang/Double") && !exprGen.ctx().stackTracker().topIsExactly("java/lang/Double"))
                     mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Double");
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/Double", "doubleValue", "()D", false);
             }

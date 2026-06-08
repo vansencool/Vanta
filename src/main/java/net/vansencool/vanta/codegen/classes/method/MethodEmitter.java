@@ -388,7 +388,7 @@ public final class MethodEmitter {
             }
             scope.syncNextLocalIndex(nextSlot);
 
-            MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, isStaticMethod, selfMethods);
+            MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, isStaticMethod, selfMethods); ctx.seedTrackerFromScope();
             ctx.seedReassignedLocals(EffectivelyFinalAnalyzer.analyze(methodDecl));
             ctx.enclosingOuterInternal(owner.currentEnclosingOuter());
             ctx.enclosingStaticOuter(owner.currentStaticOuter());
@@ -514,7 +514,7 @@ public final class MethodEmitter {
                 nextSlot += paramType.stackSize();
             }
             scope.syncNextLocalIndex(nextSlot);
-            MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, "java/lang/Object", isStaticMethod, selfMethods);
+            MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, "java/lang/Object", isStaticMethod, selfMethods); ctx.seedTrackerFromScope();
             ctx.nestedClassFields(owner.nestedClassFields());
             ctx.nestedClassConstants(owner.nestedClassConstants());
             ctx.nestedClassMethods(owner.nestedClassMethods());
@@ -565,7 +565,7 @@ public final class MethodEmitter {
             nextSlot = 2;
         }
         scope.syncNextLocalIndex(nextSlot);
-        MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, false, selfMethods);
+        MethodContext ctx = new MethodContext(mv, scope, owner.typeResolver(), new MethodResolver(owner.classpathManager()), classInternal, superInternal, false, selfMethods); ctx.seedTrackerFromScope();
         ctx.enclosingOuterInternal(owner.currentEnclosingOuter());
         ctx.enclosingStaticOuter(owner.currentStaticOuter());
         ctx.nestedClassFields(owner.nestedClassFields());

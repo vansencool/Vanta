@@ -87,10 +87,11 @@ public final class BinaryExpressionEmitter {
         if ("==".equals(op) || "!=".equals(op)) {
             boolean isNull = LiteralPredicates.isNullLiteral(binary.left()) || LiteralPredicates.isNullLiteral(binary.right());
             if (isNull) {
+                ResolvedType anyRef = ResolvedType.ofObject("java/lang/Object");
                 if (LiteralPredicates.isNullLiteral(binary.left())) {
-                    exprGen.generate(binary.right());
+                    exprGen.generate(binary.right(), anyRef);
                 } else {
-                    exprGen.generate(binary.left());
+                    exprGen.generate(binary.left(), anyRef);
                 }
                 exprGen.numericCoercion().intComparison("==".equals(op) ? Opcodes.IFNULL : Opcodes.IFNONNULL);
                 return;

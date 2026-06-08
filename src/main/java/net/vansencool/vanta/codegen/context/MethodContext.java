@@ -2,6 +2,8 @@ package net.vansencool.vanta.codegen.context;
 
 import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
+import net.vansencool.vanta.codegen.stack.StackTypeTracker;
+import net.vansencool.vanta.codegen.stack.TrackingMethodVisitor;
 import net.vansencool.vanta.parser.ast.AstNode;
 import net.vansencool.vanta.resolver.ExpressionTypeInferrer;
 import net.vansencool.vanta.resolver.MethodResolver;
@@ -31,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class MethodContext {
 
     private final @NotNull MethodVisitor mv;
+    private final @NotNull StackTypeTracker stackTracker;
     private final @NotNull Scope scope;
     private final @NotNull LabelContext labelContext;
     private final @NotNull TypeResolver typeResolver;
@@ -77,7 +80,8 @@ public final class MethodContext {
      * @param selfMethods       map of self-method keys to info for self-call resolution
      */
     public MethodContext(@NotNull MethodVisitor mv, @NotNull Scope scope, @NotNull TypeResolver typeResolver, @NotNull MethodResolver methodResolver, @NotNull String classInternalName, @NotNull String superInternalName, boolean isStatic, @NotNull Map<String, SelfMethodInfo> selfMethods) {
-        this.mv = mv;
+        this.stackTracker = new StackTypeTracker();
+        this.mv = new TrackingMethodVisitor(mv, stackTracker, 256);
         this.scope = scope;
         this.labelContext = new LabelContext();
         this.typeResolver = typeResolver;
@@ -211,13 +215,12 @@ public final class MethodContext {
             methodStartLabel = start;
         }
         openLocal(name, type.descriptor(), null, start, lv.index());
+        recordTrackerLocal(lv);
         return lv;
     }
 
     /**
      * Declares a pattern binding for {@code instanceof} pattern matching.
-     * Pattern bindings are tagged so the duplicate local check treats them as
-     * shadowable when later code introduces a regular local with the same name.
      */
     public @NotNull LocalVariable declarePatternLocal(@NotNull String name, @NotNull ResolvedType type) {
         LocalVariable lv = scope.declarePattern(name, type);
@@ -228,7 +231,15 @@ public final class MethodContext {
             methodStartLabel = start;
         }
         openLocal(name, type.descriptor(), null, start, lv.index());
+        recordTrackerLocal(lv);
         return lv;
+    }
+
+    private void recordTrackerLocal(@NotNull LocalVariable lv) {
+        if (!(mv instanceof TrackingMethodVisitor tmv)) return;
+        String internal = lv.type().internalName();
+        if (internal != null) tmv.recordLocal(lv.index(), internal);
+        else if (lv.type().descriptor().startsWith("[")) tmv.recordLocal(lv.index(), lv.type().descriptor());
     }
 
     /**
@@ -276,6 +287,28 @@ public final class MethodContext {
      */
     public @NotNull MethodVisitor mv() {
         return mv;
+    }
+
+    /**
+     * @return abstract operand stack mirror for redundancy elimination decisions
+     */
+    public @NotNull StackTypeTracker stackTracker() {
+        return stackTracker;
+    }
+
+    /**
+     * Seeds the underlying tracker's local slot map from currently declared scope entries.
+     */
+    public void seedTrackerFromScope() {
+        if (!(mv instanceof TrackingMethodVisitor tmv)) return;
+        for (String name : scope.allNames()) {
+            LocalVariable lv = scope.resolve(name);
+            if (lv == null) continue;
+            String desc = lv.type().descriptor();
+            String internal = lv.type().internalName();
+            if (internal != null) tmv.recordLocal(lv.index(), internal);
+            else if (desc.startsWith("[")) tmv.recordLocal(lv.index(), desc);
+        }
     }
 
     /**

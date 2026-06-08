@@ -18,6 +18,8 @@ import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.util.HashSet;
+
 /**
  * Emits bytecode for a method-call expression. Routes {@code super(...)} /
  * {@code this(...)} constructor calls, receiver-bound virtual / interface /
@@ -87,6 +89,7 @@ public final class MethodCallEmitter {
                             exprGen.lastEmittedAnonInternal(null);
                             exprGen.generate(call.target());
                             if (targetIsAnonNew) anonOwner = exprGen.lastEmittedAnonInternal();
+                            insertReceiverCheckcast(targetType, resolved);
                             exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective());
                         }
                         exprGen.discardDepth(savedDiscard);
@@ -229,5 +232,21 @@ public final class MethodCallEmitter {
      */
     private static boolean isVarargs(@NotNull MethodResolver.ResolvedMethod resolved) {
         return resolved.symbol() != null && resolved.symbol().isVarargs();
+    }
+
+    /**
+     * Emits {@code CHECKCAST} on the receiver when its static type does not
+     * already implement or extend the resolved method's owner. Handles
+     * intersection bound type variables where the erased primary bound lacks
+     * the method.
+     */
+    private void insertReceiverCheckcast(@NotNull ResolvedType targetType, @NotNull MethodResolver.ResolvedMethod resolved) {
+        String targetInternal = targetType.internalName();
+        if (targetInternal == null) return;
+        if (targetInternal.equals(resolved.owner())) return;
+        if (!resolved.isInterface()) return;
+        if (exprGen.isSubtype(targetInternal, resolved.owner(), new HashSet<>())) return;
+        if (exprGen.ctx().stackTracker().topIsExactly(resolved.owner())) return;
+        exprGen.ctx().mv().visitTypeInsn(Opcodes.CHECKCAST, resolved.owner());
     }
 }

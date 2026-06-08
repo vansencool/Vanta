@@ -52,7 +52,7 @@ public final class ConditionEmitter {
             switch (op) {
                 case "==", "!=", "<", "<=", ">", ">=" -> {
                     if (("==".equals(op) || "!=".equals(op)) && (LiteralPredicates.isNullLiteral(binary.left()) || LiteralPredicates.isNullLiteral(binary.right()))) {
-                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left());
+                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
                         mv.visitJumpInsn("==".equals(op) ? Opcodes.IFNONNULL : Opcodes.IFNULL, falseLabel);
                     } else if (("==".equals(op) || "!=".equals(op)) && exprGen.isReferenceType(binary.left()) && exprGen.isReferenceType(binary.right())) {
                         exprGen.generate(binary.left());
@@ -147,7 +147,7 @@ public final class ConditionEmitter {
             switch (op) {
                 case "==", "!=", "<", "<=", ">", ">=" -> {
                     if (("==".equals(op) || "!=".equals(op)) && (LiteralPredicates.isNullLiteral(binary.left()) || LiteralPredicates.isNullLiteral(binary.right()))) {
-                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left());
+                        exprGen.generate(LiteralPredicates.isNullLiteral(binary.left()) ? binary.right() : binary.left(), ResolvedType.ofObject("java/lang/Object"));
                         mv.visitJumpInsn("==".equals(op) ? Opcodes.IFNULL : Opcodes.IFNONNULL, trueLabel);
                     } else if (("==".equals(op) || "!=".equals(op)) && exprGen.isReferenceType(binary.left()) && exprGen.isReferenceType(binary.right())) {
                         exprGen.generate(binary.left());

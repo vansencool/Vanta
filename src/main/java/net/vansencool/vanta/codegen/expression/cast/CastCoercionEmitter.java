@@ -126,8 +126,10 @@ public final class CastCoercionEmitter {
             }
             boolean castFromRawObject = castInnerReturnsRawObject(cast.expression());
             if (castFromRawObject || effectiveSource == null || effectiveSource == ResolvedType.NULL || !isSourceAssignableToTarget(effectiveSource, internalName)) {
-                ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, internalName);
-                exprGen.lastCheckcastType(internalName);
+                if (!ctx.stackTracker().topIsExactly(internalName)) {
+                    ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, internalName);
+                    exprGen.lastCheckcastType(internalName);
+                }
             }
         }
     }
