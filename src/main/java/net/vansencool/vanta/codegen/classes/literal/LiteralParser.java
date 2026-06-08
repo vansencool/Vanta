@@ -76,6 +76,10 @@ public final class LiteralParser {
                 case 'n' -> '\n';
                 case 't' -> '\t';
                 case 'r' -> '\r';
+                case 'b' -> '\b';
+                case 'f' -> '\f';
+                case '0' -> '\0';
+                case 's' -> ' ';
                 case '\\' -> '\\';
                 case '\'' -> '\'';
                 case '"' -> '"';
