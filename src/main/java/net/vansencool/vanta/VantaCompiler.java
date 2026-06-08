@@ -7,6 +7,7 @@ import net.vansencool.vanta.diagnostic.DiagnosticReport;
 import net.vansencool.vanta.exception.CompilationException;
 import net.vansencool.vanta.exception.MultiCompilationException;
 import net.vansencool.vanta.lexer.Lexer;
+import net.vansencool.vanta.lower.LowerPipeline;
 import net.vansencool.vanta.lexer.token.Token;
 import net.vansencool.vanta.parser.Parser;
 import net.vansencool.vanta.parser.ast.AstNode;
@@ -141,7 +142,7 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         List<Token> tokens = lexer.tokenize();
         Parser parser = new Parser(tokens, source, sourceFile, lexer.comments());
         parser.report(report);
-        return parser.parse();
+        return LowerPipeline.defaults().run(parser.parse());
     }
 
     /**
