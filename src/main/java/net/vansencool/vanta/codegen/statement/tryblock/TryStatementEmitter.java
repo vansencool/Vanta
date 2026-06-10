@@ -115,12 +115,16 @@ public final class TryStatementEmitter {
         int watermark = ctx.scope().nextLocalIndex();
 
         Label endLabel = new Label();
-        if (finallyLabel != null) {
+        boolean anyReachesEnd = false;
+        if (finallyLabel != null && ctx.isReachable()) {
             ctx.scope().syncNextLocalIndex(savedNextIndex);
             resourceCloseEmitter.emitClose(mv, resourceSlots, resourceOwners, resourceOwnerIsInterface);
             if (tryStmt.finallyBlock() != null) emitFinallyBody(tryStmt.finallyBlock());
         }
-        if (ctx.isReachable()) mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+        if (ctx.isReachable()) {
+            mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+            anyReachesEnd = true;
+        }
         ctx.markUnreachable();
 
         for (int i = 0; i < tryStmt.catchClauses().size(); i++) {
@@ -155,7 +159,10 @@ public final class TryStatementEmitter {
             }
             boolean isLastCatch = i == tryStmt.catchClauses().size() - 1;
             boolean skipTrailingGoto = isLastCatch && finallyLabel == null;
-            if (ctx.isReachable() && !skipTrailingGoto) mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+            if (ctx.isReachable()) {
+                if (!skipTrailingGoto) mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+                anyReachesEnd = true;
+            }
             ctx.markUnreachable();
         }
 
@@ -172,7 +179,8 @@ public final class TryStatementEmitter {
             ctx.markUnreachable();
         }
 
-        ctx.markReachable();
+        if (anyReachesEnd) ctx.markReachable();
+        else ctx.markUnreachable();
         mv.visitLabel(endLabel);
         ctx.scope().syncNextLocalIndex(savedNextIndex);
     }

@@ -118,12 +118,45 @@ public final class LabelContext {
     }
 
     /**
+     * Marks the loop owning the resolved continue target as having an
+     * executed {@code continue}. Mirrors the resolution walk of
+     * {@link #continueLabel(String)}.
+     */
+    public void markContinueUsed(@Nullable String label) {
+        if (label != null) {
+            LoopLabels named = namedLabels.get(label);
+            if (named != null) {
+                named.hadContinue = true;
+                return;
+            }
+        }
+        for (LoopLabels frame : loopStack) {
+            if (frame.continueLabel != null) {
+                frame.hadContinue = true;
+                return;
+            }
+        }
+    }
+
+    /**
+     * @return true when the innermost loop has had a {@code continue} that
+     * targets its continue label
+     */
+    public boolean currentLoopHadContinue() {
+        for (LoopLabels frame : loopStack) {
+            if (frame.continueLabel != null) return frame.hadContinue;
+        }
+        return false;
+    }
+
+    /**
      * Internal record of break/continue label pair.
      */
     private static final class LoopLabels {
         final @NotNull Label breakLabel;
         final @Nullable Label continueLabel;
         boolean hadBreak;
+        boolean hadContinue;
 
         LoopLabels(@NotNull Label breakLabel, @Nullable Label continueLabel) {
             this.breakLabel = breakLabel;

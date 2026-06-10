@@ -63,7 +63,7 @@ public final class LoopStatementEmitter {
         }
 
         stmtGen.generate(whileStmt.body());
-        mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
+        if (ctx.isReachable()) mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
         ctx.markUnreachable();
 
         boolean hadBreak = ctx.labelContext().currentLoopHadBreak();
@@ -129,15 +129,18 @@ public final class LoopStatementEmitter {
 
         stmtGen.generate(forStmt.body());
 
-        ctx.markReachable();
-        mv.visitLabel(updateLabel);
-        if (forStmt.updaters() != null && !forStmt.updaters().isEmpty()) {
-            mv.visitLineNumber(forStmt.line(), updateLabel);
-            for (Expression updater : forStmt.updaters()) {
-                exprGen.generateAndDiscard(updater);
+        boolean updateLive = ctx.isReachable() || ctx.labelContext().currentLoopHadContinue();
+        if (updateLive) {
+            ctx.markReachable();
+            mv.visitLabel(updateLabel);
+            if (forStmt.updaters() != null && !forStmt.updaters().isEmpty()) {
+                mv.visitLineNumber(forStmt.line(), updateLabel);
+                for (Expression updater : forStmt.updaters()) {
+                    exprGen.generateAndDiscard(updater);
+                }
             }
+            mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
         }
-        mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
         ctx.markUnreachable();
 
         ctx.markReachable();
@@ -211,9 +214,11 @@ public final class LoopStatementEmitter {
         mv.visitVarInsn(OpcodeUtils.storeOpcode(varType), loopVar.index());
 
         stmtGen.generate(forEach.body());
-        mv.visitLabel(continueLabel);
-        mv.visitIincInsn(idxVar.index(), 1);
-        mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
+        if (ctx.isReachable() || ctx.labelContext().currentLoopHadContinue()) {
+            mv.visitLabel(continueLabel);
+            mv.visitIincInsn(idxVar.index(), 1);
+            mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
+        }
         ctx.markUnreachable();
 
         ctx.markReachable();
@@ -279,7 +284,7 @@ public final class LoopStatementEmitter {
         mv.visitVarInsn(OpcodeUtils.storeOpcode(varType), loopVar.index());
 
         stmtGen.generate(forEach.body());
-        mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
+        if (ctx.isReachable()) mv.visitJumpInsn(Opcodes.GOTO, conditionLabel);
         ctx.markUnreachable();
 
         ctx.markReachable();

@@ -399,6 +399,7 @@ public final class StatementGenerator {
     private void generateContinue(@NotNull ContinueStatement continueStmt) {
         Label target = ctx.labelContext().continueLabel(continueStmt.label());
         if (target == null) throw new CompilationException(JumpOutsideLoopDiagnostic.build(ctx, continueStmt, "continue", "loop"));
+        ctx.labelContext().markContinueUsed(continueStmt.label());
         ctx.mv().visitJumpInsn(Opcodes.GOTO, target);
         ctx.markUnreachable();
     }
@@ -479,10 +480,14 @@ public final class StatementGenerator {
             generate(stmt);
         }
         ctx.popFinally();
-        mv.visitVarInsn(Opcodes.ALOAD, lockVar.index());
-        mv.visitInsn(Opcodes.MONITOREXIT);
-        mv.visitLabel(tryEnd);
-        mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+        if (ctx.isReachable()) {
+            mv.visitVarInsn(Opcodes.ALOAD, lockVar.index());
+            mv.visitInsn(Opcodes.MONITOREXIT);
+            mv.visitLabel(tryEnd);
+            mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+        } else {
+            mv.visitLabel(tryEnd);
+        }
         ctx.markUnreachable();
 
         ctx.markReachable();

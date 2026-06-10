@@ -175,6 +175,16 @@ public final class SwitchExpressionEmitter {
             mv.visitJumpInsn(Opcodes.GOTO, defaultLabel);
         }
 
+        if (!hasExplicitDefault) {
+            ctx.markReachable();
+            mv.visitLabel(defaultLabel);
+            mv.visitTypeInsn(Opcodes.NEW, "java/lang/IncompatibleClassChangeError");
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IncompatibleClassChangeError", "<init>", "()V", false);
+            mv.visitInsn(Opcodes.ATHROW);
+            ctx.markUnreachable();
+        }
+
         StatementGenerator stmtGen = new StatementGenerator(ctx, exprGen);
         idx = 0;
         for (SwitchCase sc : switchExpr.cases()) {
@@ -206,16 +216,6 @@ public final class SwitchExpressionEmitter {
                 mv.visitJumpInsn(Opcodes.GOTO, endLabel);
                 ctx.markUnreachable();
             }
-        }
-
-        if (!hasExplicitDefault) {
-            ctx.markReachable();
-            mv.visitLabel(defaultLabel);
-            mv.visitTypeInsn(Opcodes.NEW, "java/lang/IncompatibleClassChangeError");
-            mv.visitInsn(Opcodes.DUP);
-            mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IncompatibleClassChangeError", "<init>", "()V", false);
-            mv.visitInsn(Opcodes.ATHROW);
-            ctx.markUnreachable();
         }
 
         ctx.markReachable();
