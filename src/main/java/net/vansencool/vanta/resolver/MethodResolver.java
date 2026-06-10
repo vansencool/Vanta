@@ -246,8 +246,8 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                 best = candidate;
                 bestSymbol = m;
             } else {
-                boolean bestIsVararg = bestSymbol.isVarargs() && bestSymbol.parameterTypes().size() != argCount;
-                boolean mIsVararg = m.isVarargs() && paramCount != argCount;
+                boolean bestIsVararg = bestSymbol.isVarargs();
+                boolean mIsVararg = m.isVarargs();
                 if (bestIsVararg && !mIsVararg) {
                     best = candidate;
                     bestSymbol = m;
@@ -405,8 +405,8 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                 best = candidate;
                 bestSymbol = m;
             } else {
-                boolean bestIsVararg = bestSymbol.isVarargs() && bestSymbol.parameterTypes().size() != argDescriptors.size();
-                boolean mIsVararg = m.isVarargs() && paramCount != argDescriptors.size();
+                boolean bestIsVararg = bestSymbol.isVarargs();
+                boolean mIsVararg = m.isVarargs();
                 if (bestIsVararg && !mIsVararg) {
                     best = candidate;
                     bestSymbol = m;
