@@ -98,6 +98,7 @@ public final class ExpressionGenerator {
     private @Nullable String lastCheckcastType = null;
     private @Nullable ResolvedType currentExpected = null;
     private boolean expectedFromAssign = false;
+    private boolean inlinePushedWidened = false;
     private @Nullable String lastEmittedAnonInternal = null;
     private @Nullable ResolvedType currentReceiverType;
     private boolean suppressGenericReturnCheckcast = false;
@@ -203,6 +204,29 @@ public final class ExpressionGenerator {
     }
 
     /**
+     * @return expected type of the expression currently being generated, or null
+     */
+    public @Nullable ResolvedType currentExpected() {
+        return currentExpected;
+    }
+
+    /**
+     * Records that an inlined constant was pushed already widened to the expected type.
+     */
+    public void markInlinePushedWidened() {
+        this.inlinePushedWidened = true;
+    }
+
+    /**
+     * @return true when the last inlined constant was pushed pre-widened, then clears the flag
+     */
+    public boolean consumeInlinePushedWidened() {
+        boolean v = inlinePushedWidened;
+        inlinePushedWidened = false;
+        return v;
+    }
+
+    /**
      * @param suppress whether cast emission should skip the trailing generic-return
      *                 {@code CHECKCAST}
      */
@@ -301,6 +325,7 @@ public final class ExpressionGenerator {
     public void generate(@NotNull Expression expr, @Nullable ResolvedType expected) {
         ResolvedType prevExpected = currentExpected;
         currentExpected = expected;
+        inlinePushedWidened = false;
         try {
             generateInner(expr, expected);
         } finally {

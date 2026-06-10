@@ -72,6 +72,7 @@ public final class NumericCoercion {
     public void widen(@Nullable ResolvedType from, @NotNull String target) {
         String src = from != null ? from.descriptor() : "I";
         if (src.equals(target)) return;
+        if (exprGen.consumeInlinePushedWidened()) return;
         MethodVisitor mv = exprGen.ctx().mv();
         if (!DescriptorUtils.isPrimitive(src) && DescriptorUtils.isPrimitive(target) && !"V".equals(target)) {
             String wrapper = wrapperInternalName(target);
@@ -216,6 +217,7 @@ public final class NumericCoercion {
             }
         } else if (target.isPrimitive() && actual.isPrimitive() && descriptorsDiffer) {
             if (intLiteralFitsTargetNarrow(value, target.descriptor())) return;
+            if (exprGen.consumeInlinePushedWidened()) return;
             PrimitiveConversionEmitter.emitPrimitiveWidening(ctx.mv(), actual.descriptor(), target.descriptor());
         } else if (!target.isPrimitive() && actual.isPrimitive()) {
             PrimitiveConversionEmitter.emitBoxing(ctx.mv(), actual);

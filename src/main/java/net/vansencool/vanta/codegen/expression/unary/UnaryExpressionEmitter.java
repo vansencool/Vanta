@@ -55,6 +55,11 @@ public final class UnaryExpressionEmitter {
                 case "-" -> {
                     if (unary.operand() instanceof LiteralExpression lit && lit.literalType() == TokenType.INT_LITERAL) {
                         OpcodeUtils.pushInt(mv, -LiteralParser.parseIntLiteral(lit.value()));
+                    } else if (unary.operand() instanceof LiteralExpression lit && lit.literalType() == TokenType.LONG_LITERAL) {
+                        long v = -LiteralParser.parseLongLiteral(lit.value());
+                        if (v == 0L) mv.visitInsn(Opcodes.LCONST_0);
+                        else if (v == 1L) mv.visitInsn(Opcodes.LCONST_1);
+                        else mv.visitLdcInsn(v);
                     } else {
                         exprGen.generate(unary.operand());
                         ResolvedType operandType = ctx.typeInferrer().infer(unary.operand());
@@ -109,13 +114,13 @@ public final class UnaryExpressionEmitter {
                 }
                 case "!" -> {
                     exprGen.generate(unary.operand());
-                    Label trueLabel = new Label();
+                    Label falseLabel = new Label();
                     Label endLabel = new Label();
-                    mv.visitJumpInsn(Opcodes.IFEQ, trueLabel);
-                    mv.visitInsn(Opcodes.ICONST_0);
-                    mv.visitJumpInsn(Opcodes.GOTO, endLabel);
-                    mv.visitLabel(trueLabel);
+                    mv.visitJumpInsn(Opcodes.IFNE, falseLabel);
                     mv.visitInsn(Opcodes.ICONST_1);
+                    mv.visitJumpInsn(Opcodes.GOTO, endLabel);
+                    mv.visitLabel(falseLabel);
+                    mv.visitInsn(Opcodes.ICONST_0);
                     mv.visitLabel(endLabel);
                 }
                 case "++" -> emitIncDec(unary, 1, true);

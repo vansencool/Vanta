@@ -3,6 +3,7 @@ package net.vansencool.vanta.codegen.expression.constant;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
+import net.vansencool.vanta.resolver.type.ResolvedType;
 import net.vansencool.vanta.symbol.field.FieldSymbol;
 import net.vansencool.vanta.symbol.field.reflection.ReflectionFieldSymbol;
 import net.vansencool.vanta.symbol.type.TypeRef;
@@ -72,11 +73,33 @@ public final class ConstantInliner {
     }
 
     private void emitConstant(@NotNull MethodVisitor mv, @NotNull Object value) {
-        if (value instanceof Integer i) OpcodeUtils.pushInt(mv, i);
-        else if (value instanceof Byte b) OpcodeUtils.pushInt(mv, b.intValue());
-        else if (value instanceof Short s) OpcodeUtils.pushInt(mv, s.intValue());
-        else if (value instanceof Character c) OpcodeUtils.pushInt(mv, c);
-        else if (value instanceof Boolean bo) mv.visitInsn(bo ? Opcodes.ICONST_1 : Opcodes.ICONST_0);
+        Long widenedIntegral = null;
+        if (value instanceof Integer i) widenedIntegral = i.longValue();
+        else if (value instanceof Byte b) widenedIntegral = b.longValue();
+        else if (value instanceof Short s) widenedIntegral = s.longValue();
+        else if (value instanceof Character c) widenedIntegral = (long) c;
+        if (widenedIntegral != null) {
+            ResolvedType expected = exprGen.currentExpected();
+            String exp = expected != null && expected.isPrimitive() ? expected.descriptor() : null;
+            if ("J".equals(exp)) {
+                emitLong(mv, widenedIntegral);
+                exprGen.markInlinePushedWidened();
+                return;
+            }
+            if ("F".equals(exp)) {
+                emitFloat(mv, widenedIntegral.floatValue());
+                exprGen.markInlinePushedWidened();
+                return;
+            }
+            if ("D".equals(exp)) {
+                emitDouble(mv, widenedIntegral.doubleValue());
+                exprGen.markInlinePushedWidened();
+                return;
+            }
+            OpcodeUtils.pushInt(mv, widenedIntegral.intValue());
+            return;
+        }
+        if (value instanceof Boolean bo) mv.visitInsn(bo ? Opcodes.ICONST_1 : Opcodes.ICONST_0);
         else if (value instanceof Long l) emitLong(mv, l);
         else if (value instanceof Float fl) emitFloat(mv, fl);
         else if (value instanceof Double d) emitDouble(mv, d);

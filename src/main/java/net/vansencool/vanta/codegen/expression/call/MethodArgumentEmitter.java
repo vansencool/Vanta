@@ -217,7 +217,9 @@ public final class MethodArgumentEmitter {
                 else if (DescriptorUtils.needsUnboxing(argDesc, paramDesc))
                     exprGen.unboxingEmitter().emit(ctx.mv(), paramDesc, argType.internalName());
                 else if (DescriptorUtils.isPrimitive(argDesc) && DescriptorUtils.isPrimitive(paramDesc) && !argDesc.equals(paramDesc)) {
-                    PrimitiveConversionEmitter.emitPrimitiveWidening(ctx.mv(), argDesc, paramDesc);
+                    if (!exprGen.consumeInlinePushedWidened()) {
+                        PrimitiveConversionEmitter.emitPrimitiveWidening(ctx.mv(), argDesc, paramDesc);
+                    }
                 } else if ("Ljava/lang/Object;".equals(argDesc) && paramType.getSort() == Type.OBJECT && !"java/lang/Object".equals(paramType.getInternalName())) {
                     ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, paramType.getInternalName());
                 } else if (paramType.getSort() == Type.OBJECT && !"java/lang/Object".equals(paramType.getInternalName())

@@ -27,10 +27,15 @@ public final class UnboxingEmitter {
             "S", new UnboxRecipe("java/lang/Short", "shortValue", "()S")
     );
 
-    private static final Map<String, UnboxRecipe> WIDENS_TO_INT = Map.of(
+    private static final Map<String, UnboxRecipe> BY_WRAPPER = Map.of(
+            "java/lang/Integer", BY_TARGET.get("I"),
+            "java/lang/Long", BY_TARGET.get("J"),
+            "java/lang/Float", BY_TARGET.get("F"),
+            "java/lang/Double", BY_TARGET.get("D"),
+            "java/lang/Boolean", BY_TARGET.get("Z"),
             "java/lang/Byte", BY_TARGET.get("B"),
-            "java/lang/Short", BY_TARGET.get("S"),
-            "java/lang/Character", BY_TARGET.get("C")
+            "java/lang/Character", BY_TARGET.get("C"),
+            "java/lang/Short", BY_TARGET.get("S")
     );
 
     private final @NotNull ExpressionGenerator exprGen;
@@ -40,16 +45,13 @@ public final class UnboxingEmitter {
     }
 
     /**
-     * Picks the wrapper, method, and descriptor for {@code targetPrimitive}.
-     * For an {@code int} target whose source is {@code Byte}/{@code Short}/
-     * {@code Character}, picks that wrapper's own unbox so the sub int result
-     * widens to int on the JVM stack naturally.
+     * Picks the unbox recipe like javac: a known source wrapper unboxes via
+     * its own value method (the caller widens the primitive afterwards);
+     * otherwise the target primitive's wrapper is assumed.
      */
     private static @Nullable UnboxRecipe pickRecipe(@NotNull String targetPrimitive, @Nullable String sourceInternal) {
-        if ("I".equals(targetPrimitive)) {
-            UnboxRecipe forSource = WIDENS_TO_INT.get(sourceInternal);
-            if (forSource != null) return forSource;
-        }
+        UnboxRecipe forSource = sourceInternal != null ? BY_WRAPPER.get(sourceInternal) : null;
+        if (forSource != null) return forSource;
         return BY_TARGET.get(targetPrimitive);
     }
 
@@ -75,9 +77,11 @@ public final class UnboxingEmitter {
         if (!alreadyTyped && !checkcastEmitted) {
             mv.visitTypeInsn(Opcodes.CHECKCAST, wrapperInternal);
         }
-        UnboxRecipe recipe = BY_TARGET.get(targetPrimitive);
+        UnboxRecipe recipe = BY_WRAPPER.get(wrapperInternal);
+        if (recipe == null) recipe = BY_TARGET.get(targetPrimitive);
         if (recipe != null) {
             mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, wrapperInternal, recipe.method, recipe.descriptor, false);
+            widenUnboxed(mv, recipe, targetPrimitive);
         }
     }
 
@@ -117,6 +121,17 @@ public final class UnboxingEmitter {
             mv.visitTypeInsn(Opcodes.CHECKCAST, recipe.wrapper);
         }
         mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, recipe.wrapper, recipe.method, recipe.descriptor, false);
+        widenUnboxed(mv, recipe, targetPrimitive);
+    }
+
+    /**
+     * Widens the recipe's produced primitive to {@code targetPrimitive} when they differ.
+     */
+    private static void widenUnboxed(@NotNull MethodVisitor mv, @NotNull UnboxRecipe recipe, @NotNull String targetPrimitive) {
+        String produced = recipe.descriptor.substring(recipe.descriptor.indexOf(')') + 1);
+        if (!produced.equals(targetPrimitive)) {
+            PrimitiveConversionEmitter.emitPrimitiveWidening(mv, produced, targetPrimitive);
+        }
     }
 
     private record UnboxRecipe(@NotNull String wrapper, @NotNull String method, @NotNull String descriptor) {
