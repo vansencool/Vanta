@@ -118,19 +118,20 @@ public final class MethodArgumentEmitter {
                 }
             }
         }
+        Map<String, ResolvedType> tvSubst = projectedReceiverMap(reflective);
         if (!needsVarargPack) {
             for (int i = 0; i < args.size(); i++) {
                 Type pt = i < paramTypes.length ? paramTypes[i] : null;
                 java.lang.reflect.Type gpt = (genericParams != null && i < genericParams.length) ? genericParams[i] : null;
                 TypeRef spt = (symbolParams != null && i < symbolParams.size()) ? symbolParams.get(i) : null;
-                emitArg(args.get(i), pt, gpt, spt);
+                emitArg(args.get(i), pt, gpt, spt, tvSubst);
             }
             return;
         }
         for (int i = 0; i < varargStart; i++) {
             java.lang.reflect.Type gpt = (genericParams != null && i < genericParams.length) ? genericParams[i] : null;
             TypeRef spt = (symbolParams != null && i < symbolParams.size()) ? symbolParams.get(i) : null;
-            emitArg(args.get(i), paramTypes[i], gpt, spt);
+            emitArg(args.get(i), paramTypes[i], gpt, spt, tvSubst);
         }
         Type arrayType = paramTypes[varargStart];
         Type elemType = arrayType.getElementType();
@@ -190,26 +191,26 @@ public final class MethodArgumentEmitter {
      * @param genericParam generic parameter type for SAM threading, or null
      */
     private void emitArg(@NotNull Expression arg, @Nullable Type paramType, @Nullable java.lang.reflect.Type genericParam) {
-        emitArg(arg, paramType, genericParam, null);
+        emitArg(arg, paramType, genericParam, null, buildReceiverTypeVarMap());
     }
 
     /**
      * @param symbolParam declared parameter ref of a source resolved method, carries type arguments reflective generics cannot
+     * @param tvSubst     type variable bindings projected to the declaring class of the resolved method
      */
-    private void emitArg(@NotNull Expression arg, @Nullable Type paramType, @Nullable java.lang.reflect.Type genericParam, @Nullable TypeRef symbolParam) {
+    private void emitArg(@NotNull Expression arg, @Nullable Type paramType, @Nullable java.lang.reflect.Type genericParam, @Nullable TypeRef symbolParam, @NotNull Map<String, ResolvedType> tvSubst) {
         MethodContext ctx = exprGen.ctx();
         ResolvedType argExpected;
         if ((arg instanceof LambdaExpression || arg instanceof MethodReferenceExpression) && paramType != null && paramType.getSort() == Type.OBJECT) {
             argExpected = ResolvedType.ofObject(paramType.getInternalName());
             if (genericParam instanceof ParameterizedType pt) {
-                Map<String, ResolvedType> tvSubst = buildReceiverTypeVarMap();
                 List<ResolvedType> typeArgs = new ArrayList<>();
                 for (java.lang.reflect.Type ta : pt.getActualTypeArguments()) {
                     typeArgs.add(GenericTypeResolver.resolve(ta, tvSubst));
                 }
                 argExpected = argExpected.withTypeArguments(typeArgs);
             } else if (genericParam instanceof TypeVariable<?> tv) {
-                ResolvedType substituted = buildReceiverTypeVarMap().get(tv.getName());
+                ResolvedType substituted = tvSubst.get(tv.getName());
                 if (substituted != null) argExpected = substituted;
             } else if (symbolParam != null && !symbolParam.typeArguments().isEmpty()) {
                 ResolvedType fromSymbol = refToResolved(symbolParam);
@@ -218,7 +219,7 @@ public final class MethodArgumentEmitter {
         } else if (paramType != null) {
             argExpected = ResolvedType.fromDescriptor(paramType.getDescriptor());
             if (genericParam instanceof TypeVariable<?> tv) {
-                ResolvedType narrowed = buildReceiverTypeVarMap().get(tv.getName());
+                ResolvedType narrowed = tvSubst.get(tv.getName());
                 if (narrowed != null && narrowed.internalName() != null) argExpected = narrowed;
             }
         } else {
@@ -287,6 +288,20 @@ public final class MethodArgumentEmitter {
             else if (!common.equals(t.internalName())) return null;
         }
         return common;
+    }
+
+    /**
+     * Receiver type variable bindings projected to the declaring class of {@code reflective}.
+     */
+    private @NotNull Map<String, ResolvedType> projectedReceiverMap(@Nullable Method reflective) {
+        Map<String, ResolvedType> base = buildReceiverTypeVarMap();
+        if (reflective == null || base.isEmpty()) return base;
+        ResolvedType recv = exprGen.currentReceiverType();
+        if (recv == null || recv.internalName() == null) return base;
+        Class<?> receiverRaw = exprGen.ctx().methodResolver().classpathManager().loadClass(recv.internalName());
+        Class<?> declaring = reflective.getDeclaringClass();
+        if (receiverRaw == null || declaring.equals(receiverRaw)) return base;
+        return GenericTypeResolver.projectTypeVars(receiverRaw, base, declaring);
     }
 
     /**
