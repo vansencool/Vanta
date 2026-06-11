@@ -28,6 +28,10 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
         return isAssignable(argDesc, paramDesc, null);
     }
 
+    public static boolean isDescriptorAssignable(@NotNull String argDesc, @NotNull String paramDesc, @Nullable TypeRegistry registry) {
+        return isAssignable(argDesc, paramDesc, registry);
+    }
+
     private static boolean isAssignable(@NotNull String argDesc, @NotNull String paramDesc, @Nullable TypeRegistry registry) {
         if (argDesc.equals(paramDesc)) return true;
         if (paramDesc.equals("Ljava/lang/Object;") && argDesc.startsWith("L")) return true;

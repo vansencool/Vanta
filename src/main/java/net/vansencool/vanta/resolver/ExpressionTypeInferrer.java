@@ -362,12 +362,12 @@ public final class ExpressionTypeInferrer {
                 if (params.get(i).isPrimitive()) return false;
                 continue;
             }
-            if (!MethodResolver.isDescriptorAssignable(argDescs[i], paramDesc)) return false;
+            if (!MethodResolver.isDescriptorAssignable(argDescs[i], paramDesc, classpathManager.typeRegistry())) return false;
         }
         if (!isVarargs) return true;
         TypeRef varargsParam = params.get(paramCount - 1);
         String varargsArrayDesc = varargsParam.descriptor();
-        if (argCount == paramCount && MethodResolver.isDescriptorAssignable(argDescs[argCount - 1], varargsArrayDesc))
+        if (argCount == paramCount && MethodResolver.isDescriptorAssignable(argDescs[argCount - 1], varargsArrayDesc, classpathManager.typeRegistry()))
             return true;
         if (!varargsArrayDesc.startsWith("[")) return true;
         String varargsElemDesc = varargsArrayDesc.substring(1);
@@ -377,7 +377,7 @@ public final class ExpressionTypeInferrer {
                 if (elemPrimitive) return false;
                 continue;
             }
-            if (!MethodResolver.isDescriptorAssignable(argDescs[i], varargsElemDesc)) return false;
+            if (!MethodResolver.isDescriptorAssignable(argDescs[i], varargsElemDesc, classpathManager.typeRegistry())) return false;
         }
         return true;
     }
@@ -703,7 +703,7 @@ public final class ExpressionTypeInferrer {
         if (params.isEmpty() || argDescs.length != params.size()) return false;
         String last = argDescs[argDescs.length - 1];
         if (last == null || !last.startsWith("[")) return false;
-        return MethodResolver.isDescriptorAssignable(last, params.get(params.size() - 1).descriptor());
+        return MethodResolver.isDescriptorAssignable(last, params.get(params.size() - 1).descriptor(), classpathManager.typeRegistry());
     }
 
     /**
