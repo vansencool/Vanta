@@ -149,7 +149,7 @@ public final class AssignmentEmitter {
         } else if (assignment.target() instanceof ArrayAccessExpression arrayAccess) {
             ResolvedType elemType = ctx.typeInferrer().infer(arrayAccess);
             String elemDesc = elemType != null ? elemType.descriptor() : "I";
-            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "array element of type '" + TypeCompatibility.display(elemType) + "'", elemType, assignment.value());
+            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "the array element", elemType, assignment.value());
             exprGen.generate(arrayAccess.array());
             exprGen.generate(arrayAccess.index());
             if ("=".equals(assignment.operator())) {
@@ -274,7 +274,7 @@ public final class AssignmentEmitter {
             }
         } else if (assignment.target() instanceof ArrayAccessExpression arrayAccess) {
             ResolvedType elemType = ctx.typeInferrer().infer(arrayAccess);
-            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "array element of type '" + TypeCompatibility.display(elemType) + "'", elemType, assignment.value());
+            if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "the array element", elemType, assignment.value());
             if ("=".equals(assignment.operator())) {
                 exprGen.generate(arrayAccess.array());
                 exprGen.generate(arrayAccess.index());

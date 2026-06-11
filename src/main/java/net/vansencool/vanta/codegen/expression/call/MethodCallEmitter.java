@@ -64,6 +64,9 @@ public final class MethodCallEmitter {
             boolean isSuperCall = call.target() instanceof SuperExpression;
             boolean targetIsAnonNew = call.target() instanceof NewExpression ne && ne.anonymousClassBody() != null;
             ResolvedType targetType = ctx.typeInferrer().infer(call.target());
+            if (targetType != null && targetType.descriptor().startsWith("[") && !"clone".equals(call.methodName())) {
+                targetType = ResolvedType.ofObject("java/lang/Object");
+            }
             if (targetType != null && targetType.internalName() != null) {
                 MethodResolver.ResolvedMethod resolved = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(targetType.internalName(), call.methodName(), call.arguments());
                 if (resolved == null && isSuperCall) {

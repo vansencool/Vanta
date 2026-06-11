@@ -15,6 +15,7 @@ import net.vansencool.vanta.parser.ast.declaration.ClassDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.CompilationUnit;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -99,10 +100,9 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
     }
 
     /**
-     * Walks the super chain for {@code ownerInternal} via reflection and
-     * registers every nested type it declares into the type resolver. Stops
-     * cycles via a visited set. Falls back silently when a class cannot be
-     * loaded.
+     * Walks the super chain for {@code ownerInternal} through the symbol
+     * layer and registers every nested type it declares into the type
+     * resolver. Stops cycles via a visited set.
      */
     private static void collectInheritedInnerNames(@NotNull TypeResolver typeResolver, @NotNull String ownerInternal) {
         Set<String> visited = new HashSet<>();
@@ -111,17 +111,18 @@ public record VantaCompiler(@NotNull ClasspathManager classpathManager) {
         while (!queue.isEmpty()) {
             String cur = queue.pop();
             if (!visited.add(cur)) continue;
-            Class<?> clazz = typeResolver.classpathManager().loadClass(cur);
-            if (clazz == null) continue;
+            TypeSymbol sym = typeResolver.classpathManager().typeRegistry().lookup(cur);
+            if (sym == null) continue;
             try {
-                for (Class<?> nested : clazz.getDeclaredClasses()) {
-                    String simple = nested.getSimpleName();
-                    String internal = nested.getName().replace('.', '/');
+                for (TypeSymbol nested : sym.nestedTypes()) {
+                    String internal = nested.internalName();
+                    int dollar = internal.lastIndexOf('$');
+                    String simple = dollar >= 0 ? internal.substring(dollar + 1) : internal.substring(internal.lastIndexOf('/') + 1);
                     typeResolver.registerInheritedInnerClass(simple, internal);
                 }
-                Class<?> sc = clazz.getSuperclass();
-                if (sc != null) queue.push(sc.getName().replace('.', '/'));
-                for (Class<?> i : clazz.getInterfaces()) queue.push(i.getName().replace('.', '/'));
+                TypeSymbol sc = sym.superclass();
+                if (sc != null) queue.push(sc.internalName());
+                for (TypeSymbol i : sym.interfaces()) queue.push(i.internalName());
             } catch (LinkageError ignored) {
             }
         }

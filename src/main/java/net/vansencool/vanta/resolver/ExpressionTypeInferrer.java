@@ -629,6 +629,10 @@ public final class ExpressionTypeInferrer {
                 }
             }
         }
+        if (targetType != null && targetType.descriptor().startsWith("[")) {
+            if ("clone".equals(call.methodName()) && call.arguments().isEmpty()) return targetType;
+            return lookupInstanceReturn("java/lang/Object", call, null);
+        }
         if (targetType == null || targetType.internalName() == null) return null;
         return lookupInstanceReturn(targetType.internalName(), call, targetType);
     }
