@@ -16,6 +16,8 @@ public interface FieldSymbol {
 
     boolean isStatic();
 
+    boolean isPrivate();
+
     boolean isFinal();
 
     /**

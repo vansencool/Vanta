@@ -372,6 +372,15 @@ public final class LambdaEmitter {
         lambdaCtx.setupLambdaSupport(cw, ctx.lambdaCounter() != null ? ctx.lambdaCounter() : new AtomicInteger(), lambdaMethodName);
         lambdaCtx.typeInferrer().registerSelfMethods(ctx.selfMethods());
         lambdaCtx.typeInferrer().copyFieldsFrom(ctx.typeInferrer());
+        lambdaCtx.enclosingOuterInternal(ctx.enclosingOuterInternal());
+        lambdaCtx.enclosingStaticOuter(ctx.enclosingStaticOuter());
+        lambdaCtx.nestedClassMethods(ctx.nestedClassMethods());
+        if (ctx.nestedClassFields() != null) lambdaCtx.nestedClassFields(ctx.nestedClassFields());
+        lambdaCtx.nestedClassConstants(ctx.nestedClassConstants());
+        lambdaCtx.typeInferrer().enclosingOuterInternal(ctx.enclosingOuterInternal());
+        lambdaCtx.typeInferrer().enclosingStaticOuter(ctx.enclosingStaticOuter());
+        lambdaCtx.typeInferrer().nestedClassMethods(ctx.nestedClassMethods());
+        lambdaCtx.typeInferrer().nestedClassFields(ctx.nestedClassFields());
 
         if (lambda.expressionBody() != null) {
             ExpressionGenerator lambdaExprGen = new ExpressionGenerator(lambdaCtx);

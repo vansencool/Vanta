@@ -44,6 +44,11 @@ public final class AsmFieldSymbol implements FieldSymbol {
     }
 
     @Override
+    public boolean isPrivate() {
+        return (info.access() & Opcodes.ACC_PRIVATE) != 0;
+    }
+
+    @Override
     public boolean isFinal() {
         return (info.access() & Opcodes.ACC_FINAL) != 0;
     }

@@ -23,6 +23,11 @@ public record SyntheticFieldSymbol(@NotNull String name, @NotNull TypeRef type, 
     }
 
     @Override
+    public boolean isPrivate() {
+        return (access & Opcodes.ACC_PRIVATE) != 0;
+    }
+
+    @Override
     public boolean isFinal() {
         return (access & Opcodes.ACC_FINAL) != 0;
     }

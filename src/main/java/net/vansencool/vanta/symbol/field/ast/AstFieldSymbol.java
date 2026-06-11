@@ -78,6 +78,11 @@ public final class AstFieldSymbol implements FieldSymbol {
     }
 
     @Override
+    public boolean isPrivate() {
+        return (declaration.modifiers() & Opcodes.ACC_PRIVATE) != 0;
+    }
+
+    @Override
     public boolean isFinal() {
         if ((declaration.modifiers() & Opcodes.ACC_FINAL) != 0) return true;
         return owner.isInterface();

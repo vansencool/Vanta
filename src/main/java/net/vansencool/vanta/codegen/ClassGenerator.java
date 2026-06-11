@@ -32,6 +32,9 @@ import net.vansencool.vanta.parser.ast.expression.NewExpression;
 import net.vansencool.vanta.parser.ast.span.SpanTable;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
+import net.vansencool.vanta.symbol.field.FieldSymbol;
+import net.vansencool.vanta.symbol.type.TypeSymbol;
+import net.vansencool.vanta.symbol.type.ref.TypeRefs;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -44,6 +47,7 @@ import org.objectweb.asm.Opcodes;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -737,6 +741,31 @@ public final class ClassGenerator {
             }
         }
         if (!constants.isEmpty()) nestedClassConstants.put(internalName, constants);
+        if (classDecl.superClass() != null) {
+            String supInternal = typeResolver.resolveInternalName(classDecl.superClass());
+            registerInheritedFields(supInternal, fieldTypes, staticFieldNames);
+        }
+    }
+
+    /**
+     * Walks the super chain registering inherited non private fields so
+     * unqualified reads in subclass bodies resolve. Own declarations shadow.
+     */
+    private void registerInheritedFields(@NotNull String superInternal, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames) {
+        Set<String> visited = new HashSet<>();
+        String cur = superInternal;
+        while (cur != null && visited.add(cur)) {
+            TypeSymbol sym = classpathManager.typeRegistry().lookup(cur);
+            if (sym == null) return;
+            for (FieldSymbol f : sym.fields()) {
+                if (f.isPrivate()) continue;
+                if (fieldTypes.containsKey(f.name())) continue;
+                fieldTypes.put(f.name(), TypeRefs.toResolved(f.type()));
+                if (f.isStatic()) staticFieldNames.add(f.name());
+            }
+            TypeSymbol sup = sym.superclass();
+            cur = sup != null ? sup.internalName() : null;
+        }
     }
 
     /**

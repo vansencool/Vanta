@@ -53,6 +53,11 @@ public final class ReflectionFieldSymbol implements FieldSymbol {
     }
 
     @Override
+    public boolean isPrivate() {
+        return Modifier.isPrivate(field.getModifiers());
+    }
+
+    @Override
     public boolean isFinal() {
         return Modifier.isFinal(field.getModifiers());
     }
