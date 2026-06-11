@@ -53,7 +53,7 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
-                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
+                if (local.isFinal() && local.hasInitializer()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generate(assignment.value());
@@ -181,7 +181,7 @@ public final class AssignmentEmitter {
         if (assignment.target() instanceof NameExpression nameExpr) {
             LocalVariable local = ctx.scope().resolve(nameExpr.name());
             if (local != null) {
-                if (local.isFinal()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
+                if (local.isFinal() && local.hasInitializer()) throw new CompilationException(FinalReassignmentDiagnostic.build(ctx, assignment, "local '" + nameExpr.name() + "'", local.declaration()));
                 if ("=".equals(assignment.operator())) {
                     checkAssignable(assignment, "variable '" + nameExpr.name() + "'", local.type(), assignment.value());
                     exprGen.generateForAssign(assignment.value(), local.type());

@@ -2,6 +2,8 @@ package net.vansencool.vanta.resolver;
 
 import net.vansencool.vanta.classpath.ClasspathManager;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
+import net.vansencool.vanta.codegen.classes.literal.LiteralParser;
+import net.vansencool.vanta.lexer.token.TokenType;
 import net.vansencool.vanta.parser.ast.expression.ArrayAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.AssignmentExpression;
@@ -141,6 +143,51 @@ public final class ExpressionTypeInferrer {
     }
 
     /**
+     * Applies the JLS 15.25 numeric rules to a conditional whose arms are
+     * both primitive: equal types stay, a byte/short/char arm absorbs an int
+     * literal arm that fits its range, byte with short yields short, and
+     * everything else takes binary numeric promotion.
+     */
+    private @NotNull ResolvedType conditionalNumericType(@NotNull ResolvedType thenT, @NotNull ResolvedType elseT, @NotNull TernaryExpression ternary) {
+        String a = thenT.descriptor();
+        String b = elseT.descriptor();
+        if (a.equals(b)) return thenT;
+        if (isSubIntDesc(a) && "I".equals(b) && intLiteralFits(ternary.elseExpression(), a)) return thenT;
+        if (isSubIntDesc(b) && "I".equals(a) && intLiteralFits(ternary.thenExpression(), b)) return elseT;
+        if (("B".equals(a) && "S".equals(b)) || ("S".equals(a) && "B".equals(b))) return ResolvedType.SHORT;
+        if ("D".equals(a) || "D".equals(b)) return ResolvedType.DOUBLE;
+        if ("F".equals(a) || "F".equals(b)) return ResolvedType.FLOAT;
+        if ("J".equals(a) || "J".equals(b)) return ResolvedType.LONG;
+        if ("Z".equals(a) || "Z".equals(b)) return thenT;
+        return ResolvedType.INT;
+    }
+
+    private static boolean isSubIntDesc(@NotNull String desc) {
+        return "B".equals(desc) || "S".equals(desc) || "C".equals(desc);
+    }
+
+    /**
+     * @return true when {@code arm} is an int literal whose value fits the range of {@code targetDesc}
+     */
+    private static boolean intLiteralFits(@NotNull Expression arm, @NotNull String targetDesc) {
+        Expression e = arm;
+        while (e instanceof ParenExpression p) e = p.expression();
+        if (!(e instanceof LiteralExpression lit) || lit.literalType() != TokenType.INT_LITERAL) return false;
+        int v;
+        try {
+            v = LiteralParser.parseIntLiteral(lit.value());
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        return switch (targetDesc) {
+            case "B" -> v >= Byte.MIN_VALUE && v <= Byte.MAX_VALUE;
+            case "S" -> v >= Short.MIN_VALUE && v <= Short.MAX_VALUE;
+            case "C" -> v >= Character.MIN_VALUE && v <= Character.MAX_VALUE;
+            default -> false;
+        };
+    }
+
+    /**
      * Returns the boxed wrapper type when {@code t} is primitive, otherwise {@code t}.
      * Used so a ternary like {@code cond ? null : x} reports the wrapper type rather
      * than the primitive of the non-null branch.
@@ -239,6 +286,10 @@ public final class ExpressionTypeInferrer {
             if (allInferred && !isApplicable(m, argDescs, isNullArg)) continue;
             if (best == null) {
                 best = m;
+                continue;
+            }
+            if (best.isVarargs() != m.isVarargs()) {
+                if (best.isVarargs()) best = m;
                 continue;
             }
             String bestOwner = best.owner().internalName();
@@ -407,6 +458,7 @@ public final class ExpressionTypeInferrer {
             if (elseT == null || elseT == ResolvedType.NULL) return boxedIfPrimitive(thenT);
             if (thenT.isPrimitive() && !elseT.isPrimitive()) return boxedIfPrimitive(thenT);
             if (!thenT.isPrimitive() && elseT.isPrimitive()) return boxedIfPrimitive(elseT);
+            if (thenT.isPrimitive() && elseT.isPrimitive()) return conditionalNumericType(thenT, elseT, ternary);
             return thenT;
         }
         if (expr instanceof InstanceofExpression) return ResolvedType.BOOLEAN;

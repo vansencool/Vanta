@@ -129,6 +129,18 @@ public final class LambdaEmitter {
                 refTargetType = ctx.typeResolver().resolve(new TypeNode(ne.name(), null, 0, ref.line()));
             } catch (Exception ignored) {
             }
+        } else if (ref.target() instanceof FieldAccessExpression fa && chainHeadIsNotValue(fa)) {
+            String dotted = dottedTypeNameOf(fa);
+            if (dotted != null) {
+                try {
+                    ResolvedType asType = ctx.typeResolver().resolve(new TypeNode(dotted, null, 0, ref.line()));
+                    if (asType.internalName() != null && ctx.methodResolver().classpathManager().exists(asType.internalName())) {
+                        refTargetName = dotted;
+                        refTargetType = asType;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
         }
         LocalVariable receiverLocal = refTargetName != null ? ctx.scope().resolve(refTargetName) : null;
         boolean refTargetIsType = receiverLocal == null && refTargetType != null && refTargetType.internalName() != null
@@ -439,6 +451,29 @@ public final class LambdaEmitter {
         }
         TypeSymbol sup = owner.superclass();
         if (sup != null) return findSamWalk(sup, visited);
+        return null;
+    }
+
+    /**
+     * @return true when the leftmost name of {@code fa} is not a local, parameter, or field, per the JLS rule that variables shadow types in ambiguous names
+     */
+    private boolean chainHeadIsNotValue(@NotNull FieldAccessExpression fa) {
+        MethodContext ctx = exprGen.ctx();
+        Expression head = fa.target();
+        while (head instanceof FieldAccessExpression inner) head = inner.target();
+        if (!(head instanceof NameExpression ne)) return false;
+        return ctx.scope().resolve(ne.name()) == null && ctx.typeInferrer().inferField(ne.name()) == null;
+    }
+
+    /**
+     * @return dotted name when {@code e} is a pure name chain, else null
+     */
+    private @Nullable String dottedTypeNameOf(@NotNull Expression e) {
+        if (e instanceof NameExpression ne) return ne.name();
+        if (e instanceof FieldAccessExpression fa) {
+            String left = dottedTypeNameOf(fa.target());
+            return left == null ? null : left + '.' + fa.fieldName();
+        }
         return null;
     }
 
