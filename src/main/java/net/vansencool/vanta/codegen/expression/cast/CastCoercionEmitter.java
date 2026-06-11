@@ -5,7 +5,9 @@ import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.parser.ast.expression.CastExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
+import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
+import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
@@ -84,7 +86,13 @@ public final class CastCoercionEmitter {
         boolean prevSuppress = exprGen.suppressGenericReturnCheckcast();
         if (!targetType.isPrimitive()) exprGen.suppressGenericReturnCheckcast(true);
         try {
-            exprGen.generate(cast.expression());
+            boolean samShaped = exprGen.unwrapParens(cast.expression()) instanceof LambdaExpression
+                    || exprGen.unwrapParens(cast.expression()) instanceof MethodReferenceExpression;
+            if (samShaped && !targetType.isPrimitive()) {
+                exprGen.generate(cast.expression(), targetType);
+            } else {
+                exprGen.generate(cast.expression());
+            }
         } finally {
             exprGen.suppressGenericReturnCheckcast(prevSuppress);
         }

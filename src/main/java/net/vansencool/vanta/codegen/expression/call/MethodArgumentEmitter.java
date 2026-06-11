@@ -14,7 +14,9 @@ import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.resolver.MethodResolver;
 import net.vansencool.vanta.resolver.type.ResolvedType;
+import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.symbol.type.TypeParameterSymbol;
+import net.vansencool.vanta.symbol.type.TypeRef;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -87,9 +89,19 @@ public final class MethodArgumentEmitter {
      * an explicit varargs flag for source resolved methods.
      */
     public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective, boolean isVarargsMethod) {
+        generateArgs(args, methodDescriptor, reflective, isVarargsMethod, null);
+    }
+
+    /**
+     * Variant that also threads the resolved method's symbol so source
+     * resolved generics (e.g. a {@code Predicate<Locale>} parameter) reach
+     * lambda and method reference arguments.
+     */
+    public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective, boolean isVarargsMethod, @Nullable MethodSymbol symbol) {
         MethodContext ctx = exprGen.ctx();
         Type[] paramTypes = ctx.methodResolver().classpathManager().argumentTypes(methodDescriptor);
         java.lang.reflect.Type[] genericParams = reflective != null ? reflective.getGenericParameterTypes() : null;
+        List<TypeRef> symbolParams = symbol != null ? symbol.parameterTypes() : null;
         boolean needsVarargPack = false;
         int varargStart = -1;
         if (isVarargsMethod && paramTypes.length > 0 && paramTypes[paramTypes.length - 1].getSort() == Type.ARRAY) {
@@ -110,13 +122,15 @@ public final class MethodArgumentEmitter {
             for (int i = 0; i < args.size(); i++) {
                 Type pt = i < paramTypes.length ? paramTypes[i] : null;
                 java.lang.reflect.Type gpt = (genericParams != null && i < genericParams.length) ? genericParams[i] : null;
-                emitArg(args.get(i), pt, gpt);
+                TypeRef spt = (symbolParams != null && i < symbolParams.size()) ? symbolParams.get(i) : null;
+                emitArg(args.get(i), pt, gpt, spt);
             }
             return;
         }
         for (int i = 0; i < varargStart; i++) {
             java.lang.reflect.Type gpt = (genericParams != null && i < genericParams.length) ? genericParams[i] : null;
-            emitArg(args.get(i), paramTypes[i], gpt);
+            TypeRef spt = (symbolParams != null && i < symbolParams.size()) ? symbolParams.get(i) : null;
+            emitArg(args.get(i), paramTypes[i], gpt, spt);
         }
         Type arrayType = paramTypes[varargStart];
         Type elemType = arrayType.getElementType();
@@ -176,6 +190,13 @@ public final class MethodArgumentEmitter {
      * @param genericParam generic parameter type for SAM threading, or null
      */
     private void emitArg(@NotNull Expression arg, @Nullable Type paramType, @Nullable java.lang.reflect.Type genericParam) {
+        emitArg(arg, paramType, genericParam, null);
+    }
+
+    /**
+     * @param symbolParam declared parameter ref of a source resolved method, carries type arguments reflective generics cannot
+     */
+    private void emitArg(@NotNull Expression arg, @Nullable Type paramType, @Nullable java.lang.reflect.Type genericParam, @Nullable TypeRef symbolParam) {
         MethodContext ctx = exprGen.ctx();
         ResolvedType argExpected;
         if ((arg instanceof LambdaExpression || arg instanceof MethodReferenceExpression) && paramType != null && paramType.getSort() == Type.OBJECT) {
@@ -190,6 +211,9 @@ public final class MethodArgumentEmitter {
             } else if (genericParam instanceof TypeVariable<?> tv) {
                 ResolvedType substituted = buildReceiverTypeVarMap().get(tv.getName());
                 if (substituted != null) argExpected = substituted;
+            } else if (symbolParam != null && !symbolParam.typeArguments().isEmpty()) {
+                ResolvedType fromSymbol = refToResolved(symbolParam);
+                if (fromSymbol != null) argExpected = fromSymbol;
             }
         } else if (paramType != null) {
             argExpected = ResolvedType.fromDescriptor(paramType.getDescriptor());
@@ -233,6 +257,21 @@ public final class MethodArgumentEmitter {
                 ctx.mv().visitTypeInsn(Opcodes.CHECKCAST, paramType.getInternalName());
             }
         }
+    }
+
+    /**
+     * @return resolved type mirroring {@code ref} including its type arguments, or null for primitives and arrays
+     */
+    private static @Nullable ResolvedType refToResolved(@NotNull TypeRef ref) {
+        String internal = ref.internalName();
+        if (internal == null || ref.descriptor().length() == 1 || ref.descriptor().startsWith("[")) return null;
+        if (ref.typeArguments().isEmpty()) return ResolvedType.ofObject(internal);
+        List<ResolvedType> args = new ArrayList<>(ref.typeArguments().size());
+        for (TypeRef ta : ref.typeArguments()) {
+            ResolvedType r = refToResolved(ta);
+            args.add(r != null ? r : ResolvedType.ofObject("java/lang/Object"));
+        }
+        return ResolvedType.ofObject(internal).withTypeArguments(args);
     }
 
     /**

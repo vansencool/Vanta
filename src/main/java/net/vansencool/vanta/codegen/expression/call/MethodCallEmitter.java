@@ -13,6 +13,7 @@ import net.vansencool.vanta.parser.ast.expression.NewExpression;
 import net.vansencool.vanta.parser.ast.expression.SuperExpression;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.MethodResolver;
+import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.MethodVisitor;
@@ -87,13 +88,13 @@ public final class MethodCallEmitter {
                     try {
                         String anonOwner = null;
                         if (resolved.opcode() == Opcodes.INVOKESTATIC) {
-                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved));
+                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved), resolved.symbol());
                         } else {
                             exprGen.lastEmittedAnonInternal(null);
                             exprGen.generate(call.target());
                             if (targetIsAnonNew) anonOwner = exprGen.lastEmittedAnonInternal();
                             insertReceiverCheckcast(targetType, resolved);
-                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved));
+                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved), resolved.symbol());
                         }
                         exprGen.discardDepth(savedDiscard);
                         int opcode = isSuperCall && resolved.opcode() == Opcodes.INVOKEVIRTUAL ? Opcodes.INVOKESPECIAL : resolved.opcode();
@@ -129,7 +130,7 @@ public final class MethodCallEmitter {
                     int savedDiscard = exprGen.discardDepth();
                     exprGen.discardDepth(0);
                     try {
-                        exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
+                        exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved), staticResolved.symbol());
                     } finally {
                         exprGen.discardDepth(savedDiscard);
                     }
@@ -151,7 +152,7 @@ public final class MethodCallEmitter {
                             int savedDiscard = exprGen.discardDepth();
                             exprGen.discardDepth(0);
                             try {
-                                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
+                                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved), staticResolved.symbol());
                             } finally {
                                 exprGen.discardDepth(savedDiscard);
                             }
@@ -181,7 +182,7 @@ public final class MethodCallEmitter {
             if (staticOwner != null) {
                 MethodResolver.ResolvedMethod staticResolved = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(staticOwner, call.methodName(), call.arguments());
                 if (staticResolved != null && staticResolved.opcode() == Opcodes.INVOKESTATIC) {
-                    exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
+                    exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved), staticResolved.symbol());
                     mv.visitMethodInsn(staticResolved.opcode(), staticResolved.owner(), staticResolved.name(), staticResolved.descriptor(), staticResolved.isInterface());
                     exprGen.emitGenericReturnCheckcast(call, staticResolved);
                     return !staticResolved.descriptor().endsWith(")V");
@@ -192,14 +193,15 @@ public final class MethodCallEmitter {
             if (!selfInfo.isStatic()) mv.visitVarInsn(Opcodes.ALOAD, 0);
             int savedDiscard = exprGen.discardDepth();
             exprGen.discardDepth(0);
+            MethodResolver.ResolvedMethod resolvedSelf = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(ctx.classInternalName(), call.methodName(), call.arguments());
+            MethodSymbol selfSymbol = resolvedSelf != null && resolvedSelf.descriptor().equals(selfInfo.descriptor()) ? resolvedSelf.symbol() : null;
             try {
-                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor(), selfInfo.isVarargs());
+                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor(), null, selfInfo.isVarargs(), selfSymbol);
             } finally {
                 exprGen.discardDepth(savedDiscard);
             }
             int opcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
             mv.visitMethodInsn(opcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), false);
-            MethodResolver.ResolvedMethod resolvedSelf = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(ctx.classInternalName(), call.methodName(), call.arguments());
             if (resolvedSelf != null) exprGen.emitGenericReturnCheckcast(call, resolvedSelf);
             return !selfInfo.descriptor().endsWith(")V");
         }
@@ -215,7 +217,7 @@ public final class MethodCallEmitter {
             selfResolved = exprGen.methodResolutionHelper().resolveInheritedProtectedMethod(ctx.superInternalName(), call.methodName(), call.arguments().size());
         }
         if (selfResolved != null && selfResolved.opcode() == Opcodes.INVOKESTATIC) {
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved), selfResolved.symbol());
             String staticOwner = selfResolved.owner();
             if (staticOwner.equals(ctx.superInternalName())) staticOwner = ctx.classInternalName();
             mv.visitMethodInsn(selfResolved.opcode(), staticOwner, selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
@@ -223,7 +225,7 @@ public final class MethodCallEmitter {
         }
         if (selfResolved != null) {
             mv.visitVarInsn(Opcodes.ALOAD, 0);
-            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved));
+            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfResolved.descriptor(), selfResolved.reflective(), isVarargs(selfResolved), selfResolved.symbol());
             mv.visitMethodInsn(selfResolved.opcode(), selfResolved.owner(), selfResolved.name(), selfResolved.descriptor(), selfResolved.isInterface());
             return !selfResolved.descriptor().endsWith(")V");
         }
