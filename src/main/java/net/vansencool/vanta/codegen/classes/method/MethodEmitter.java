@@ -582,8 +582,9 @@ public final class MethodEmitter {
     }
 
     /**
-     * Weaves each non-constant instance-field initializer onto {@code mv}
-     * after the super constructor call, in source order.
+     * Weaves each non-constant instance-field initializer and instance
+     * initializer block onto {@code mv} after the super constructor call,
+     * in source order.
      */
     private void emitInstanceFieldInitializers(@NotNull ClassDeclaration classDecl, @NotNull String internalName, @NotNull ExpressionGenerator exprGen, @NotNull MethodVisitor mv) {
         for (AstNode member : classDecl.members()) {
@@ -599,6 +600,11 @@ public final class MethodEmitter {
                         exprGen.numericCoercion().adaptForStore(fieldResolved, declarator.initializer());
                         mv.visitFieldInsn(Opcodes.PUTFIELD, internalName, declarator.name(), fieldResolved.descriptor());
                     }
+                }
+            } else if (member instanceof MethodDeclaration md && "<iinit>".equals(md.name()) && md.body() != null) {
+                StatementGenerator initGen = new StatementGenerator(exprGen.ctx(), exprGen);
+                for (Statement stmt : md.body().statements()) {
+                    initGen.generate(stmt);
                 }
             }
         }

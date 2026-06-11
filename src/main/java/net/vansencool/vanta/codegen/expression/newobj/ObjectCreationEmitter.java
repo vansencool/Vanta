@@ -7,6 +7,7 @@ import net.vansencool.vanta.codegen.ClassGenerator;
 import net.vansencool.vanta.codegen.ExpressionGenerator;
 import net.vansencool.vanta.codegen.MethodGenerator;
 import net.vansencool.vanta.codegen.SelfMethodInfo;
+import net.vansencool.vanta.codegen.StatementGenerator;
 import net.vansencool.vanta.codegen.classes.opcode.OpcodeUtils;
 import net.vansencool.vanta.codegen.context.MethodContext;
 import net.vansencool.vanta.codegen.diagnostic.lambda.capture.NonEffectivelyFinalCaptureDiagnostic;
@@ -432,6 +433,7 @@ public final class ObjectCreationEmitter {
                 argSlot += t.stackSize();
             }
             initMv.visitMethodInsn(Opcodes.INVOKESPECIAL, superInternal, "<init>", superCtorDesc, false);
+            emitAnonInstanceInitializers(cw, members, initMv, internalName, superInternal, slot, fieldTypes, staticFieldNames, selfMethods, outerInternal, capturedFields);
             initMv.visitInsn(Opcodes.RETURN);
             initMv.visitMaxs(0, 0);
             initMv.visitEnd();
@@ -439,13 +441,47 @@ public final class ObjectCreationEmitter {
 
         for (AstNode member : members) {
             if (member instanceof MethodDeclaration methodDecl) {
-                if ("<clinit>".equals(methodDecl.name()) || "<init>".equals(methodDecl.name())) continue;
+                if ("<clinit>".equals(methodDecl.name()) || "<init>".equals(methodDecl.name()) || "<iinit>".equals(methodDecl.name())) continue;
                 emitMethodForAnon(cw, methodDecl, internalName, superInternal, fieldTypes, staticFieldNames, selfMethods, outerInternal, capturedFields);
             }
         }
         ClassGenerator cg = ctx.classGenerator();
         if (cg != null) {
             cg.bridgeMethodEmitter().emitForMembers(cw, members, internalName, bridgeSupers);
+        }
+    }
+
+    /**
+     * Weaves instance initializer blocks of an anonymous class into its
+     * synthesized constructor, after the super call.
+     */
+    private void emitAnonInstanceInitializers(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull MethodVisitor initMv, @NotNull String internalName, @NotNull String superInternal, int nextSlot, @NotNull Map<String, ResolvedType> fieldTypes, @NotNull Set<String> staticFieldNames, @NotNull Map<String, SelfMethodInfo> selfMethods, @NotNull String outerInternal, @NotNull Map<String, ResolvedType> capturedFields) {
+        boolean hasInit = members.stream().anyMatch(m -> m instanceof MethodDeclaration md && "<iinit>".equals(md.name()) && md.body() != null);
+        if (!hasInit) return;
+        MethodContext outerCtx = exprGen.ctx();
+        Scope scope = new Scope(0);
+        scope.declare("this", ResolvedType.ofObject(internalName));
+        scope.syncNextLocalIndex(nextSlot);
+        MethodContext inner = new MethodContext(initMv, scope, outerCtx.typeResolver(), new MethodResolver(outerCtx.methodResolver().classpathManager()), internalName, superInternal, false, selfMethods);
+        inner.enclosingOuterInternal(outerInternal);
+        if (outerCtx.nestedClassFields() != null) inner.nestedClassFields(outerCtx.nestedClassFields());
+        if (outerCtx.nestedClassMethods() != null) inner.nestedClassMethods(outerCtx.nestedClassMethods());
+        if (outerCtx.nestedClassConstants() != null) inner.nestedClassConstants(outerCtx.nestedClassConstants());
+        if (!capturedFields.isEmpty()) inner.capturedFields(capturedFields);
+        inner.setupLambdaSupport(cw, outerCtx.lambdaCounter() != null ? outerCtx.lambdaCounter() : new AtomicInteger(), "<init>");
+        inner.setupAnonClassSupport(outerCtx.classGenerator(), cw, outerCtx.anonClassCounter() != null ? outerCtx.anonClassCounter() : new AtomicInteger(), "<init>", outerCtx.anonClassBytecodes(), outerCtx.anonClassNames());
+        inner.typeInferrer().registerSelfMethods(selfMethods);
+        for (Map.Entry<String, ResolvedType> entry : fieldTypes.entrySet()) {
+            inner.typeInferrer().registerField(entry.getKey(), entry.getValue(), staticFieldNames.contains(entry.getKey()));
+        }
+        ExpressionGenerator innerExpr = new ExpressionGenerator(inner);
+        StatementGenerator initGen = new StatementGenerator(inner, innerExpr);
+        for (AstNode member : members) {
+            if (member instanceof MethodDeclaration md && "<iinit>".equals(md.name()) && md.body() != null) {
+                for (Statement stmt : md.body().statements()) {
+                    initGen.generate(stmt);
+                }
+            }
         }
     }
 
