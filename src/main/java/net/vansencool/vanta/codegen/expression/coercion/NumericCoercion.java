@@ -81,9 +81,9 @@ public final class NumericCoercion {
         }
         if (!DescriptorUtils.isPrimitive(src) || !DescriptorUtils.isPrimitive(target)) return;
         switch (src + target) {
-            case "IJ" -> mv.visitInsn(Opcodes.I2L);
-            case "IF" -> mv.visitInsn(Opcodes.I2F);
-            case "ID" -> mv.visitInsn(Opcodes.I2D);
+            case "IJ", "BJ", "SJ", "CJ" -> mv.visitInsn(Opcodes.I2L);
+            case "IF", "BF", "SF", "CF" -> mv.visitInsn(Opcodes.I2F);
+            case "ID", "BD", "SD", "CD" -> mv.visitInsn(Opcodes.I2D);
             case "JI" -> mv.visitInsn(Opcodes.L2I);
             case "JF" -> mv.visitInsn(Opcodes.L2F);
             case "JD" -> mv.visitInsn(Opcodes.L2D);

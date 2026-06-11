@@ -65,7 +65,7 @@ public final class SwitchKeyResolver {
         }
         if (label instanceof LiteralExpression lit) {
             if (lit.literalType() == TokenType.INT_LITERAL) {
-                return Integer.parseInt(lit.value().replace("_", ""));
+                return LiteralParser.parseIntLiteral(lit.value());
             }
             if (lit.literalType() == TokenType.CHAR_LITERAL) {
                 return LiteralParser.parseCharLiteral(lit.value());
