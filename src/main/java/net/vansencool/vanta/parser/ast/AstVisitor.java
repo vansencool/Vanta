@@ -16,6 +16,7 @@ import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
 import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
+import net.vansencool.vanta.parser.ast.expression.ClassLiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.expression.NewArrayExpression;
@@ -359,4 +360,11 @@ public interface AstVisitor {
      * @param node the method reference expression
      */
     void visit(@NotNull MethodReferenceExpression node);
+
+    /**
+     * Visits an array class literal expression.
+     *
+     * @param node the class literal expression
+     */
+    void visit(@NotNull ClassLiteralExpression node);
 }

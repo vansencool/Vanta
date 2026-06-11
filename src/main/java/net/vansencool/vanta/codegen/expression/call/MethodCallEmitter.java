@@ -84,13 +84,13 @@ public final class MethodCallEmitter {
                     try {
                         String anonOwner = null;
                         if (resolved.opcode() == Opcodes.INVOKESTATIC) {
-                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective());
+                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved));
                         } else {
                             exprGen.lastEmittedAnonInternal(null);
                             exprGen.generate(call.target());
                             if (targetIsAnonNew) anonOwner = exprGen.lastEmittedAnonInternal();
                             insertReceiverCheckcast(targetType, resolved);
-                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective());
+                            exprGen.methodArgumentEmitter().generateArgs(call.arguments(), resolved.descriptor(), resolved.reflective(), isVarargs(resolved));
                         }
                         exprGen.discardDepth(savedDiscard);
                         int opcode = isSuperCall && resolved.opcode() == Opcodes.INVOKEVIRTUAL ? Opcodes.INVOKESPECIAL : resolved.opcode();
@@ -126,7 +126,7 @@ public final class MethodCallEmitter {
                     int savedDiscard = exprGen.discardDepth();
                     exprGen.discardDepth(0);
                     try {
-                        exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective());
+                        exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
                     } finally {
                         exprGen.discardDepth(savedDiscard);
                     }
@@ -148,7 +148,7 @@ public final class MethodCallEmitter {
                             int savedDiscard = exprGen.discardDepth();
                             exprGen.discardDepth(0);
                             try {
-                                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective());
+                                exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
                             } finally {
                                 exprGen.discardDepth(savedDiscard);
                             }
@@ -178,7 +178,7 @@ public final class MethodCallEmitter {
             if (staticOwner != null) {
                 MethodResolver.ResolvedMethod staticResolved = exprGen.methodResolutionHelper().resolveMethodWithArgTypes(staticOwner, call.methodName(), call.arguments());
                 if (staticResolved != null && staticResolved.opcode() == Opcodes.INVOKESTATIC) {
-                    exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective());
+                    exprGen.methodArgumentEmitter().generateArgs(call.arguments(), staticResolved.descriptor(), staticResolved.reflective(), isVarargs(staticResolved));
                     mv.visitMethodInsn(staticResolved.opcode(), staticResolved.owner(), staticResolved.name(), staticResolved.descriptor(), staticResolved.isInterface());
                     exprGen.emitGenericReturnCheckcast(call, staticResolved);
                     return !staticResolved.descriptor().endsWith(")V");
@@ -231,7 +231,8 @@ public final class MethodCallEmitter {
      * @return true when the resolved method's underlying symbol is declared as varargs
      */
     private static boolean isVarargs(@NotNull MethodResolver.ResolvedMethod resolved) {
-        return resolved.symbol() != null && resolved.symbol().isVarargs();
+        if (resolved.symbol() != null && resolved.symbol().isVarargs()) return true;
+        return resolved.reflective() != null && resolved.reflective().isVarArgs();
     }
 
     /**

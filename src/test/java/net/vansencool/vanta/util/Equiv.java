@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -633,6 +634,14 @@ public final class Equiv {
         Map<String, byte[]> javacOut = JavacCompiler.compileAll(javacSources);
 
         Path stubDir = Files.createTempDirectory("equiv-stubs-");
+        try {
+            return compareWithStubs(label, javacOut, vantaSources, stubDir);
+        } finally {
+            deleteTree(stubDir);
+        }
+    }
+
+    private static int compareWithStubs(@NotNull String label, @NotNull Map<String, byte[]> javacOut, @NotNull Map<String, String> vantaSources, @NotNull Path stubDir) throws IOException {
         for (Map.Entry<String, byte[]> e : javacOut.entrySet()) {
             Path out = stubDir.resolve(e.getKey().replace('.', '/') + ".class");
             Files.createDirectories(out.getParent());
@@ -730,6 +739,15 @@ public final class Equiv {
     private static @NotNull String firstLine(@NotNull String s) {
         int nl = s.indexOf('\n');
         return nl < 0 ? s : s.substring(0, nl);
+    }
+
+    private static void deleteTree(@NotNull Path root) throws IOException {
+        if (!Files.exists(root)) return;
+        try (Stream<Path> walk = Files.walk(root)) {
+            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+        }
     }
 
     private static @NotNull String clipDiff(@NotNull List<String> diffs) {

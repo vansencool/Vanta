@@ -7,6 +7,7 @@ import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.AssignmentExpression;
 import net.vansencool.vanta.parser.ast.expression.BinaryExpression;
 import net.vansencool.vanta.parser.ast.expression.CastExpression;
+import net.vansencool.vanta.parser.ast.expression.ClassLiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
@@ -409,6 +410,7 @@ public final class ExpressionTypeInferrer {
             return thenT;
         }
         if (expr instanceof InstanceofExpression) return ResolvedType.BOOLEAN;
+        if (expr instanceof ClassLiteralExpression) return ResolvedType.ofObject("java/lang/Class");
         if (expr instanceof ArrayAccessExpression arrayAccess) return inferArrayAccess(arrayAccess);
         if (expr instanceof ArrayInitializerExpression init) {
             if (init.elements().isEmpty()) return null;

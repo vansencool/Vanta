@@ -32,6 +32,7 @@ import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.AssignmentExpression;
 import net.vansencool.vanta.parser.ast.expression.BinaryExpression;
 import net.vansencool.vanta.parser.ast.expression.CastExpression;
+import net.vansencool.vanta.parser.ast.expression.ClassLiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
@@ -60,6 +61,7 @@ import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
 import java.util.HashSet;
 import java.util.List;
@@ -383,6 +385,8 @@ public final class ExpressionGenerator {
             generateThis();
         } else if (expr instanceof SuperExpression) {
             generateSuper();
+        } else if (expr instanceof ClassLiteralExpression classLit) {
+            generateClassLiteral(classLit);
         } else if (expr instanceof ParenExpression paren) {
             generate(paren.expression(), expected);
         } else if (expr instanceof ArrayInitializerExpression arrayInit) {
@@ -570,6 +574,14 @@ public final class ExpressionGenerator {
         if (iv == null) return false;
         OpcodeUtils.pushInt(ctx.mv(), iv);
         return true;
+    }
+
+    /**
+     * Pushes the {@code Class} constant for an array class literal like {@code String[].class}.
+     */
+    private void generateClassLiteral(@NotNull ClassLiteralExpression classLit) {
+        ResolvedType resolved = ctx.typeResolver().resolve(classLit.type());
+        ctx.mv().visitLdcInsn(Type.getType(resolved.descriptor()));
     }
 
     private void generateName(@NotNull NameExpression name) {

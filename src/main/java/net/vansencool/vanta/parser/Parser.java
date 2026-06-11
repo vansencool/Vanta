@@ -30,6 +30,7 @@ import net.vansencool.vanta.parser.ast.expression.ArrayInitializerExpression;
 import net.vansencool.vanta.parser.ast.expression.AssignmentExpression;
 import net.vansencool.vanta.parser.ast.expression.BinaryExpression;
 import net.vansencool.vanta.parser.ast.expression.CastExpression;
+import net.vansencool.vanta.parser.ast.expression.ClassLiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
@@ -1547,7 +1548,8 @@ public final class Parser {
             parseAnnotations();
             parseModifiers();
             parseType();
-            return check(IDENTIFIER) && peek().type() == COLON;
+            boolean nameLike = check(IDENTIFIER) || check(VAR) || check(YIELD) || check(RECORD);
+            return nameLike && peek().type() == COLON;
         } catch (Backtrack b) {
             return false;
         } finally {
@@ -1727,6 +1729,8 @@ public final class Parser {
         int line = current().line();
         expect(CATCH);
         expect(LEFT_PAREN);
+        parseAnnotations();
+        parseModifiers();
         List<TypeNode> types = new ArrayList<>();
         types.add(parseType());
         while (check(PIPE)) {
@@ -2300,6 +2304,10 @@ public final class Parser {
                 }
             } else if (check(LEFT_BRACKET)) {
                 int line = current().line();
+                if (peek().type() == RIGHT_BRACKET) {
+                    expr = parseArrayConstructorReference(expr);
+                    continue;
+                }
                 advance();
                 Expression index = parseExpression();
                 expect(RIGHT_BRACKET);
@@ -2326,6 +2334,58 @@ public final class Parser {
             }
         }
         return expr;
+    }
+
+    /**
+     * Parses {@code Type[]::new} as the equivalent size-taking lambda, or
+     * {@code Type[].class} as an array class literal.
+     */
+    private @NotNull Expression parseArrayConstructorReference(@NotNull Expression qualifier) {
+        Token openBracket = current();
+        int dims = 0;
+        while (check(LEFT_BRACKET) && peek().type() == RIGHT_BRACKET) {
+            advance();
+            advance();
+            dims++;
+        }
+        String typeName = dottedNameOf(qualifier);
+        if (typeName == null) {
+            throw new CompilationException(Diagnostic.builder()
+                    .severity(Severity.ERROR)
+                    .title("array type suffix requires a type name before `[]`")
+                    .sourceFile(sourceFile)
+                    .fullSource(source)
+                    .at(openBracket.line(), SourceLines.lineAt(source, openBracket.line()))
+                    .highlight(openBracket.column() - 1, openBracket.column())
+                    .label("`[]::new` or `[].class` must follow a class or interface name")
+                    .build());
+        }
+        if (check(DOT) && peek().type() == CLASS) {
+            Token dotTok = current();
+            advance();
+            advance();
+            return span(startTokenOf(qualifier, dotTok), new ClassLiteralExpression(new TypeNode(typeName, null, dims, dotTok.line()), dotTok.line()));
+        }
+        expect(DOUBLE_COLON);
+        Token newTok = current();
+        expect(NEW);
+        TypeNode elementType = new TypeNode(typeName, null, 0, newTok.line());
+        Parameter sizeParam = new Parameter(new TypeNode("var", List.of(), 0, newTok.line()), "arg0", 0, List.of(), false);
+        Expression size = new NameExpression("arg0", newTok.line());
+        NewArrayExpression newArray = new NewArrayExpression(elementType, List.of(size), dims - 1, null, newTok.line());
+        return span(startTokenOf(qualifier, newTok), new LambdaExpression(List.of(sizeParam), null, newArray, newTok.line()));
+    }
+
+    /**
+     * @return dotted type name when {@code e} is a plain name or field access chain, else null
+     */
+    private @Nullable String dottedNameOf(@NotNull Expression e) {
+        if (e instanceof NameExpression ne) return ne.name();
+        if (e instanceof FieldAccessExpression fa) {
+            String left = dottedNameOf(fa.target());
+            return left == null ? null : left + '.' + fa.fieldName();
+        }
+        return null;
     }
 
     /**

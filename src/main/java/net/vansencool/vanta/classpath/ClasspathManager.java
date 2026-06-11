@@ -15,9 +15,12 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -235,9 +238,20 @@ public final class ClasspathManager {
             if (!f.exists()) continue;
             if (f.isDirectory()) {
                 try {
-                    Files.walk(entry).filter(p -> p.toString().endsWith(".class")).forEach(p -> {
-                        String rel = entry.relativize(p).toString();
-                        out.add(rel.substring(0, rel.length() - ".class".length()).replace(File.separatorChar, '/'));
+                    Files.walkFileTree(entry, new SimpleFileVisitor<>() {
+                        @Override
+                        public @NotNull FileVisitResult visitFile(@NotNull Path p, @NotNull BasicFileAttributes attrs) {
+                            if (p.toString().endsWith(".class")) {
+                                String rel = entry.relativize(p).toString();
+                                out.add(rel.substring(0, rel.length() - ".class".length()).replace(File.separatorChar, '/'));
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public @NotNull FileVisitResult visitFileFailed(@NotNull Path p, @NotNull IOException exc) {
+                            return FileVisitResult.CONTINUE;
+                        }
                     });
                 } catch (IOException ignored) {
                 }
