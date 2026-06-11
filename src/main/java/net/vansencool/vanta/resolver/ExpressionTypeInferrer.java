@@ -288,8 +288,10 @@ public final class ExpressionTypeInferrer {
                 best = m;
                 continue;
             }
-            if (best.isVarargs() != m.isVarargs()) {
-                if (best.isVarargs()) best = m;
+            boolean bestEffVarargs = best.isVarargs() && !invokedInArrayForm(best, argDescs, allInferred);
+            boolean mEffVarargs = m.isVarargs() && !invokedInArrayForm(m, argDescs, allInferred);
+            if (bestEffVarargs != mEffVarargs) {
+                if (bestEffVarargs) best = m;
                 continue;
             }
             String bestOwner = best.owner().internalName();
@@ -668,21 +670,40 @@ public final class ExpressionTypeInferrer {
             if (name != null && receiverType != null && receiverType.typeArguments() != null) {
                 List<TypeParameterSymbol> classParams = method.owner().typeParameters();
                 for (int i = 0; i < classParams.size() && i < receiverType.typeArguments().size(); i++) {
-                    if (classParams.get(i).name().equals(name)) return receiverType.typeArguments().get(i);
+                    if (classParams.get(i).name().equals(name)) return withReturnDims(receiverType.typeArguments().get(i), ret);
                 }
             }
             if (call != null) {
                 ResolvedType fromArgs = bindMethodTypeVariableFromCallArgs(method, name, call);
-                if (fromArgs != null) return fromArgs;
+                if (fromArgs != null) return withReturnDims(fromArgs, ret);
             }
         }
         ResolvedType base = refToResolved(ret);
         if (!ret.typeArguments().isEmpty() && base.internalName() != null) {
             List<ResolvedType> args = new ArrayList<>(ret.typeArguments().size());
-            for (TypeRef arg : ret.typeArguments()) args.add(substituteTypeRef(arg, method, receiverType));
+            for (TypeRef arg : ret.typeArguments()) args.add(substituteTypeRef(arg, method, receiverType, call));
             base = base.withTypeArguments(args);
         }
         return base;
+    }
+
+    /**
+     * Reapplies the array dimensions of a {@code T[]} shaped return to the bound type variable value.
+     */
+    private static @NotNull ResolvedType withReturnDims(@NotNull ResolvedType bound, @NotNull TypeRef ret) {
+        return ret.arrayDimensions() > 0 ? bound.asArray(ret.arrayDimensions()) : bound;
+    }
+
+    /**
+     * True when a varargs method is being called with its trailing array passed directly, which competes as fixed arity per JLS 15.12.2.
+     */
+    private boolean invokedInArrayForm(@NotNull MethodSymbol m, String @NotNull [] argDescs, boolean argsInferred) {
+        if (!m.isVarargs() || !argsInferred) return false;
+        List<TypeRef> params = m.parameterTypes();
+        if (params.isEmpty() || argDescs.length != params.size()) return false;
+        String last = argDescs[argDescs.length - 1];
+        if (last == null || !last.startsWith("[")) return false;
+        return MethodResolver.isDescriptorAssignable(last, params.get(params.size() - 1).descriptor());
     }
 
     /**
@@ -698,13 +719,21 @@ public final class ExpressionTypeInferrer {
             TypeRef p = params.get(i);
             if (p.isTypeVariable() && tvName.equals(p.typeVariableName())) {
                 ResolvedType argType = infer(args.get(i));
-                if (argType != null && argType != ResolvedType.NULL) return argType;
+                if (argType == null || argType == ResolvedType.NULL) continue;
+                if (p.arrayDimensions() > 0) {
+                    String desc = argType.descriptor();
+                    int strip = 0;
+                    while (strip < p.arrayDimensions() && strip < desc.length() && desc.charAt(strip) == '[') strip++;
+                    if (strip == p.arrayDimensions()) return ResolvedType.fromDescriptor(desc.substring(strip));
+                    continue;
+                }
+                return argType;
             }
         }
         return null;
     }
 
-    private @NotNull ResolvedType substituteTypeRef(@NotNull TypeRef ref, @NotNull MethodSymbol method, @Nullable ResolvedType receiverType) {
+    private @NotNull ResolvedType substituteTypeRef(@NotNull TypeRef ref, @NotNull MethodSymbol method, @Nullable ResolvedType receiverType, @Nullable MethodCallExpression call) {
         if (ref.isTypeVariable()) {
             String name = ref.typeVariableName();
             if (name != null && receiverType != null && receiverType.typeArguments() != null) {
@@ -713,12 +742,16 @@ public final class ExpressionTypeInferrer {
                     if (classParams.get(i).name().equals(name)) return receiverType.typeArguments().get(i);
                 }
             }
+            if (call != null) {
+                ResolvedType fromArgs = bindMethodTypeVariableFromCallArgs(method, name, call);
+                if (fromArgs != null) return fromArgs;
+            }
             return ResolvedType.ofObject("java/lang/Object");
         }
         ResolvedType base = refToResolved(ref);
         if (ref.typeArguments().isEmpty() || base.internalName() == null) return base;
         List<ResolvedType> args = new ArrayList<>(ref.typeArguments().size());
-        for (TypeRef arg : ref.typeArguments()) args.add(substituteTypeRef(arg, method, receiverType));
+        for (TypeRef arg : ref.typeArguments()) args.add(substituteTypeRef(arg, method, receiverType, call));
         return base.withTypeArguments(args);
     }
 

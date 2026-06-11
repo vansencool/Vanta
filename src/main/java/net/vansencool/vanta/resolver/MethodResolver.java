@@ -152,6 +152,18 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
         return isAssignable(argDesc, paramDesc, classpathManager.typeRegistry());
     }
 
+    /**
+     * True when a varargs method is being called with its trailing array passed directly, which competes as fixed arity per JLS 15.12.2.
+     */
+    private static boolean invokedInArrayForm(@NotNull MethodSymbol m, @NotNull List<String> argDescriptors, @Nullable TypeRegistry registry) {
+        if (!m.isVarargs()) return false;
+        List<TypeRef> params = m.parameterTypes();
+        if (params.isEmpty() || argDescriptors.size() != params.size()) return false;
+        String last = argDescriptors.get(argDescriptors.size() - 1);
+        if (last == null || !last.startsWith("[")) return false;
+        return isAssignable(last, params.get(params.size() - 1).descriptor(), registry);
+    }
+
     private boolean isAssignable(@NotNull String argDesc, @NotNull String paramDesc) {
         return isAssignable(argDesc, paramDesc, classpathManager.typeRegistry());
     }
@@ -405,8 +417,8 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                 best = candidate;
                 bestSymbol = m;
             } else {
-                boolean bestIsVararg = bestSymbol.isVarargs();
-                boolean mIsVararg = m.isVarargs();
+                boolean bestIsVararg = bestSymbol.isVarargs() && !invokedInArrayForm(bestSymbol, argDescriptors, registry);
+                boolean mIsVararg = m.isVarargs() && !invokedInArrayForm(m, argDescriptors, registry);
                 if (bestIsVararg && !mIsVararg) {
                     best = candidate;
                     bestSymbol = m;
