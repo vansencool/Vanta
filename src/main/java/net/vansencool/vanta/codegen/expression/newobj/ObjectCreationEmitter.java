@@ -18,6 +18,7 @@ import net.vansencool.vanta.parser.ast.declaration.FieldDeclarator;
 import net.vansencool.vanta.parser.ast.declaration.MethodDeclaration;
 import net.vansencool.vanta.parser.ast.declaration.Parameter;
 import net.vansencool.vanta.parser.ast.expression.Expression;
+import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.NewExpression;
 import net.vansencool.vanta.parser.ast.statement.BlockStatement;
@@ -29,6 +30,7 @@ import net.vansencool.vanta.resolver.scope.LocalVariable;
 import net.vansencool.vanta.resolver.scope.Scope;
 import net.vansencool.vanta.resolver.type.ResolvedType;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
+import net.vansencool.vanta.symbol.type.TypeRef;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.ClassWriter;
@@ -209,7 +211,15 @@ public final class ObjectCreationEmitter {
             String enclosingOuter = enclosingOuterFor(declaredType);
             if (enclosingOuter != null) mv.visitVarInsn(Opcodes.ALOAD, 0);
             String desc = exprGen.methodResolutionHelper().resolveConstructorDescriptor(declaredType, newExpr.arguments(), enclosingOuter);
-            exprGen.methodArgumentEmitter().generateArgs(newExpr.arguments(), desc);
+            List<String> argDescsForLookup = new ArrayList<>();
+            for (Expression a : newExpr.arguments()) {
+                ResolvedType t = ctx.typeInferrer().infer(a);
+                argDescsForLookup.add(t != null ? t.descriptor() : "Ljava/lang/Object;");
+            }
+            MethodSymbol ctorSym = ctx.methodResolver().resolveConstructorSymbol(declaredType, argDescsForLookup);
+            if (ctorSym == null) ctorSym = uniqueCtorByArity(declaredType, newExpr.arguments().size());
+            boolean ctorVarargs = ctorSym != null && ctorSym.isVarargs();
+            exprGen.methodArgumentEmitter().generateArgs(newExpr.arguments(), desc, null, ctorVarargs, ctorSym, ctorWitnessBindings(ctorSym, newExpr.arguments()));
             mv.visitMethodInsn(Opcodes.INVOKESPECIAL, declaredType, "<init>", desc, false);
         }
     }
@@ -246,6 +256,44 @@ public final class ObjectCreationEmitter {
             return cg.nestMemberInternals().contains(internalName);
         }
         return false;
+    }
+
+    /**
+     * The single declared constructor with {@code argCount} parameters, or null when none or several match.
+     */
+    private @Nullable MethodSymbol uniqueCtorByArity(@NotNull String ownerInternal, int argCount) {
+        MethodContext ctx = exprGen.ctx();
+        var owner = ctx.methodResolver().classpathManager().typeRegistry().lookup(ownerInternal);
+        if (owner == null) return null;
+        MethodSymbol found = null;
+        for (MethodSymbol m : owner.methods()) {
+            if (!"<init>".equals(m.name()) || m.parameterTypes().size() != argCount) continue;
+            if (found != null) return null;
+            found = m;
+        }
+        return found;
+    }
+
+    /**
+     * Binds constructor class type variables witnessed by zero parameter
+     * lambda arguments: such a lambda's SAM return is its body type, and a
+     * single variable interface puts that variable in return position.
+     */
+    private @Nullable Map<String, ResolvedType> ctorWitnessBindings(@Nullable MethodSymbol ctorSym, @NotNull List<Expression> args) {
+        if (ctorSym == null) return null;
+        MethodContext ctx = exprGen.ctx();
+        Map<String, ResolvedType> witness = new HashMap<>();
+        List<TypeRef> params = ctorSym.parameterTypes();
+        for (int i = 0; i < params.size() && i < args.size(); i++) {
+            TypeRef p = params.get(i);
+            if (p.typeArguments().size() != 1 || !p.typeArguments().get(0).isTypeVariable()) continue;
+            String name = p.typeArguments().get(0).typeVariableName();
+            if (name == null) continue;
+            if (!(args.get(i) instanceof LambdaExpression le) || !le.parameters().isEmpty() || le.expressionBody() == null) continue;
+            ResolvedType bodyType = ctx.typeInferrer().infer(le.expressionBody());
+            if (bodyType != null && bodyType != ResolvedType.NULL && !bodyType.isPrimitive()) witness.put(name, bodyType);
+        }
+        return witness.isEmpty() ? null : witness;
     }
 
     /**

@@ -98,6 +98,15 @@ public final class MethodArgumentEmitter {
      * lambda and method reference arguments.
      */
     public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective, boolean isVarargsMethod, @Nullable MethodSymbol symbol) {
+        generateArgs(args, methodDescriptor, reflective, isVarargsMethod, symbol, null);
+    }
+
+    /**
+     * Variant accepting prebuilt type variable bindings, used for diamond
+     * constructor calls where the class type variables bind from sibling
+     * argument witnesses rather than the receiver.
+     */
+    public void generateArgs(@NotNull List<Expression> args, @NotNull String methodDescriptor, @Nullable Method reflective, boolean isVarargsMethod, @Nullable MethodSymbol symbol, @Nullable Map<String, ResolvedType> prebuiltSubst) {
         MethodContext ctx = exprGen.ctx();
         Type[] paramTypes = ctx.methodResolver().classpathManager().argumentTypes(methodDescriptor);
         java.lang.reflect.Type[] genericParams = reflective != null ? reflective.getGenericParameterTypes() : null;
@@ -118,7 +127,7 @@ public final class MethodArgumentEmitter {
                 }
             }
         }
-        Map<String, ResolvedType> tvSubst = projectedReceiverMap(reflective);
+        Map<String, ResolvedType> tvSubst = prebuiltSubst != null ? prebuiltSubst : projectedReceiverMap(reflective);
         if (!needsVarargPack) {
             for (int i = 0; i < args.size(); i++) {
                 Type pt = i < paramTypes.length ? paramTypes[i] : null;
@@ -213,7 +222,7 @@ public final class MethodArgumentEmitter {
                 ResolvedType substituted = tvSubst.get(tv.getName());
                 if (substituted != null) argExpected = substituted;
             } else if (symbolParam != null && !symbolParam.typeArguments().isEmpty()) {
-                ResolvedType fromSymbol = refToResolved(symbolParam);
+                ResolvedType fromSymbol = refToResolved(symbolParam, tvSubst);
                 if (fromSymbol != null) argExpected = fromSymbol;
             }
         } else if (paramType != null) {
@@ -264,12 +273,23 @@ public final class MethodArgumentEmitter {
      * @return resolved type mirroring {@code ref} including its type arguments, or null for primitives and arrays
      */
     private static @Nullable ResolvedType refToResolved(@NotNull TypeRef ref) {
+        return refToResolved(ref, Map.of());
+    }
+
+    /**
+     * @param tvSubst bindings for type variables appearing among the type arguments
+     */
+    private static @Nullable ResolvedType refToResolved(@NotNull TypeRef ref, @NotNull Map<String, ResolvedType> tvSubst) {
+        if (ref.isTypeVariable() && ref.typeVariableName() != null) {
+            ResolvedType bound = tvSubst.get(ref.typeVariableName());
+            if (bound != null) return bound;
+        }
         String internal = ref.internalName();
         if (internal == null || ref.descriptor().length() == 1 || ref.descriptor().startsWith("[")) return null;
         if (ref.typeArguments().isEmpty()) return ResolvedType.ofObject(internal);
         List<ResolvedType> args = new ArrayList<>(ref.typeArguments().size());
         for (TypeRef ta : ref.typeArguments()) {
-            ResolvedType r = refToResolved(ta);
+            ResolvedType r = refToResolved(ta, tvSubst);
             args.add(r != null ? r : ResolvedType.ofObject("java/lang/Object"));
         }
         return ResolvedType.ofObject(internal).withTypeArguments(args);
