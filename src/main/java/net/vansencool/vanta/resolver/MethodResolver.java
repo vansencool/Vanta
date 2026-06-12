@@ -144,6 +144,10 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
                 if (argPrim || argDescs == null) return false;
                 continue;
             }
+            if (bp.descriptor().startsWith("[") || mp.descriptor().startsWith("[")) {
+                if (isAssignable(mp.descriptor(), bp.descriptor(), registry)) continue;
+                return false;
+            }
             String bpInternal = bp.internalName();
             String mpInternal = mp.internalName();
             if (bpInternal != null && mpInternal != null && isSubtype(mpInternal, bpInternal, registry)) continue;
