@@ -13,8 +13,10 @@ import net.vansencool.vanta.parser.ast.expression.ClassLiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.Expression;
 import net.vansencool.vanta.parser.ast.expression.FieldAccessExpression;
 import net.vansencool.vanta.parser.ast.expression.InstanceofExpression;
+import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.LiteralExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
+import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
 import net.vansencool.vanta.parser.ast.expression.NewArrayExpression;
 import net.vansencool.vanta.parser.ast.expression.NewExpression;
@@ -729,6 +731,74 @@ public final class ExpressionTypeInferrer {
                 }
                 return argType;
             }
+            if (!p.typeArguments().isEmpty() && mentionsVariable(p.typeArguments().get(p.typeArguments().size() - 1), tvName)) {
+                ResolvedType fromSam = samReturnOfArg(args.get(i));
+                if (fromSam != null) {
+                    ResolvedType unified = unifyVariable(p.typeArguments().get(p.typeArguments().size() - 1), fromSam, tvName);
+                    if (unified != null) return unified;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Structurally matches {@code actual} against {@code pattern}, returning the type the variable {@code tvName} takes.
+     */
+    private static @Nullable ResolvedType unifyVariable(@NotNull TypeRef pattern, @NotNull ResolvedType actual, @NotNull String tvName) {
+        if (pattern.isTypeVariable() && tvName.equals(pattern.typeVariableName())) {
+            if (pattern.arrayDimensions() > 0) {
+                String desc = actual.descriptor();
+                int strip = 0;
+                while (strip < pattern.arrayDimensions() && strip < desc.length() && desc.charAt(strip) == '[') strip++;
+                return strip == pattern.arrayDimensions() ? ResolvedType.fromDescriptor(desc.substring(strip)) : null;
+            }
+            return actual;
+        }
+        if (!pattern.typeArguments().isEmpty() && actual.typeArguments() != null && pattern.internalName() != null && pattern.internalName().equals(actual.internalName())) {
+            List<ResolvedType> actualArgs = actual.typeArguments();
+            List<TypeRef> patternArgs = pattern.typeArguments();
+            for (int i = 0; i < patternArgs.size() && i < actualArgs.size(); i++) {
+                ResolvedType unified = unifyVariable(patternArgs.get(i), actualArgs.get(i), tvName);
+                if (unified != null) return unified;
+            }
+        }
+        return null;
+    }
+
+    private static boolean mentionsVariable(@NotNull TypeRef ref, @NotNull String name) {
+        if (ref.isTypeVariable() && name.equals(ref.typeVariableName())) return true;
+        for (TypeRef ta : ref.typeArguments()) {
+            if (mentionsVariable(ta, name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The value type a lambda or method reference argument produces, when its shape pins it down.
+     */
+    private @Nullable ResolvedType samReturnOfArg(@NotNull Expression arg) {
+        Expression e = arg;
+        while (e instanceof ParenExpression paren) e = paren.expression();
+        if (e instanceof LambdaExpression le && le.expressionBody() != null) {
+            ResolvedType body = infer(le.expressionBody());
+            if (body == null || body == ResolvedType.NULL) return null;
+            return boxedIfPrimitive(body);
+        }
+        if (e instanceof MethodReferenceExpression mr && mr.target() instanceof NameExpression ne && !"new".equals(mr.methodName())) {
+            ResolvedType targetType = typeResolver.resolve(new TypeNode(ne.name(), null, 0, mr.line()));
+            if (targetType.internalName() == null) return null;
+            TypeSymbol sym = classpathManager.typeRegistry().lookup(targetType.internalName());
+            if (sym == null) return null;
+            ResolvedType distinctReturn = null;
+            for (MethodSymbol m : sym.methods()) {
+                if (!m.name().equals(mr.methodName())) continue;
+                ResolvedType ret = refToResolved(m.returnType());
+                ResolvedType boxed = ret.isPrimitive() ? boxedIfPrimitive(ret) : ret;
+                if (distinctReturn != null && boxed != null && !distinctReturn.descriptor().equals(boxed.descriptor())) return null;
+                distinctReturn = boxed;
+            }
+            return distinctReturn;
         }
         return null;
     }
