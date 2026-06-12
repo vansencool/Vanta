@@ -253,6 +253,12 @@ public final class StatementGenerator {
             } else if (type != null && !type.isPrimitive() && methodReturn != null && methodReturn.isPrimitive() && !methodReturn.isVoid()) {
                 exprGen.unboxingEmitter().forReturn(mv, type, methodReturn);
                 type = methodReturn;
+            } else if (type != null && type.isPrimitive() && methodReturn != null && methodReturn.isPrimitive() && !methodReturn.isVoid() && !type.descriptor().equals(methodReturn.descriptor()) && !valueAlreadyCoerced) {
+                boolean litInPlace = exprGen.unwrapParens(ret.value()) instanceof LiteralExpression lit && exprGen.litHandledExpectedType(lit, methodReturn.descriptor());
+                if (!exprGen.consumeInlinePushedWidened() && !litInPlace) {
+                    PrimitiveConversionEmitter.emitPrimitiveWidening(mv, type.descriptor(), methodReturn.descriptor());
+                }
+                type = methodReturn;
             }
             if (valueAlreadyCoerced && methodReturn != null && !methodReturn.isPrimitive()) {
                 type = methodReturn;
