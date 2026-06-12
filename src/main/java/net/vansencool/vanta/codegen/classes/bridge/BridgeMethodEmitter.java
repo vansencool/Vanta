@@ -9,6 +9,7 @@ import net.vansencool.vanta.parser.ast.type.TypeNode;
 import net.vansencool.vanta.resolver.TypeResolver;
 import net.vansencool.vanta.symbol.method.MethodSymbol;
 import net.vansencool.vanta.symbol.registry.TypeRegistry;
+import net.vansencool.vanta.symbol.type.TypeRef;
 import net.vansencool.vanta.symbol.type.TypeSymbol;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.ClassWriter;
@@ -48,15 +49,34 @@ public final class BridgeMethodEmitter {
 
     public void emitForMembers(@NotNull ClassWriter cw, @NotNull List<AstNode> members, @NotNull String internalName, @NotNull List<String> supers) {
         Set<String> emitted = new HashSet<>();
+        Object entryScope = typeResolver.captureScope();
+        for (AstNode member : members) {
+            if (!(member instanceof MethodDeclaration md)) continue;
+            boolean hasTypeParams = md.typeParameters() != null && !md.typeParameters().isEmpty();
+            if (hasTypeParams) {
+                typeResolver.adoptScope(entryScope);
+                typeResolver.registerTypeParameters(md.typeParameters());
+            }
+            List<TypeNode> paramTypes = new ArrayList<>();
+            for (Parameter p : md.parameters()) paramTypes.add(p.type());
+            emitted.add(md.name() + typeResolver.methodDescriptor(paramTypes, md.returnType()));
+            if (hasTypeParams) typeResolver.adoptScope(entryScope);
+        }
         for (AstNode member : members) {
             if (!(member instanceof MethodDeclaration md)) continue;
             if ("<init>".equals(md.name()) || "<clinit>".equals(md.name())) continue;
             if ((md.modifiers() & Opcodes.ACC_STATIC) != 0) continue;
             if ((md.modifiers() & Opcodes.ACC_PRIVATE) != 0) continue;
+            boolean hasTypeParams = md.typeParameters() != null && !md.typeParameters().isEmpty();
+            if (hasTypeParams) {
+                typeResolver.adoptScope(entryScope);
+                typeResolver.registerTypeParameters(md.typeParameters());
+            }
             List<TypeNode> paramTypes = new ArrayList<>();
             for (Parameter p : md.parameters()) paramTypes.add(p.type());
             String myReturnDesc = typeResolver.resolveDescriptor(md.returnType());
             String myDesc = typeResolver.methodDescriptor(paramTypes, md.returnType());
+            if (hasTypeParams) typeResolver.adoptScope(entryScope);
             for (BridgeTarget bt : collectBridgeTargets(supers, md.name(), paramTypes.size(), myReturnDesc, myDesc)) {
                 String key = md.name() + bt.descriptor();
                 if (!emitted.add(key)) continue;
@@ -111,7 +131,7 @@ public final class BridgeMethodEmitter {
             if (m.parameterTypes().size() != paramCount) continue;
             String desc = m.descriptor();
             if (desc.equals(myDesc) || seen.contains(desc)) continue;
-            if (isBridgeOverride(myDesc, desc)) {
+            if (isBridgeOverride(myDesc, desc, m)) {
                 seen.add(desc);
                 out.add(new BridgeTarget(desc));
             }
@@ -124,15 +144,17 @@ public final class BridgeMethodEmitter {
         }
     }
 
-    private boolean isBridgeOverride(@NotNull String childDesc, @NotNull String parentDesc) {
+    private boolean isBridgeOverride(@NotNull String childDesc, @NotNull String parentDesc, @NotNull MethodSymbol parent) {
         Type[] cp = Type.getArgumentTypes(childDesc);
         Type[] pp = Type.getArgumentTypes(parentDesc);
         if (cp.length != pp.length) return false;
+        List<TypeRef> parentParams = parent.parameterTypes();
         boolean anyDiff = false;
         for (int i = 0; i < cp.length; i++) {
             String c = cp[i].getDescriptor();
             String p = pp[i].getDescriptor();
             if (c.equals(p)) continue;
+            if (i >= parentParams.size() || !containsTypeVariable(parentParams.get(i))) return false;
             if (!(p.startsWith("L") || p.startsWith("["))) return false;
             if (!(c.startsWith("L") || c.startsWith("["))) return false;
             if (!isReferenceAssignable(c, p)) return false;
@@ -147,6 +169,14 @@ public final class BridgeMethodEmitter {
             anyDiff = true;
         }
         return anyDiff;
+    }
+
+    private static boolean containsTypeVariable(@NotNull TypeRef ref) {
+        if (ref.isTypeVariable()) return true;
+        for (TypeRef ta : ref.typeArguments()) {
+            if (containsTypeVariable(ta)) return true;
+        }
+        return false;
     }
 
     private boolean isReferenceAssignable(@NotNull String childDesc, @NotNull String parentDesc) {

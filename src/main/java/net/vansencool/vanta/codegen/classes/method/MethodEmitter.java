@@ -348,10 +348,12 @@ public final class MethodEmitter {
         ResolvedType resolvedReturnType = owner.typeResolver().resolve(methodDecl.returnType());
         boolean isCtor = "<init>".equals(methodDecl.name());
         boolean prependOuterThis = isCtor && owner.currentEnclosingOuter() != null;
+        boolean prependEnumNameOrdinal = isCtor && "java/lang/Enum".equals(superInternal);
         String outerDesc = prependOuterThis ? "L" + owner.currentEnclosingOuter() + ";" : null;
         StringBuilder descBuilder = new StringBuilder(32);
         descBuilder.append('(');
         if (prependOuterThis) descBuilder.append(outerDesc);
+        if (prependEnumNameOrdinal) descBuilder.append("Ljava/lang/String;I");
         for (ResolvedType pt : resolvedParamTypes) descBuilder.append(pt.descriptor());
         descBuilder.append(')').append(resolvedReturnType.descriptor());
         String descriptor = descBuilder.toString();
@@ -379,6 +381,11 @@ public final class MethodEmitter {
             if (prependOuterThis) {
                 scope.declare("this$0", ResolvedType.ofObject(owner.currentEnclosingOuter()));
                 nextSlot++;
+            }
+            if (prependEnumNameOrdinal) {
+                scope.declare("$enum$name", ResolvedType.ofObject("java/lang/String"));
+                scope.declare("$enum$ordinal", ResolvedType.INT);
+                nextSlot += 2;
             }
 
             for (int i = 0; i < paramCount; i++) {
@@ -411,6 +418,7 @@ public final class MethodEmitter {
             }
             int paramSlot = isStaticMethod ? 0 : 1;
             if (prependOuterThis) paramSlot++;
+            if (prependEnumNameOrdinal) paramSlot += 2;
             for (int i = 0; i < paramCount; i++) {
                 ResolvedType paramType = resolvedParamTypes[i];
                 ctx.openLocal(methodDecl.parameters().get(i).name(), paramType.descriptor(), null, methodStart, paramSlot);
@@ -426,7 +434,13 @@ public final class MethodEmitter {
                 }
                 if (!startsWithConstructorCall(methodDecl)) {
                     mv.visitVarInsn(Opcodes.ALOAD, 0);
-                    mv.visitMethodInsn(Opcodes.INVOKESPECIAL, superInternal, "<init>", "()V", false);
+                    if (prependEnumNameOrdinal) {
+                        mv.visitVarInsn(Opcodes.ALOAD, 1);
+                        mv.visitVarInsn(Opcodes.ILOAD, 2);
+                        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, superInternal, "<init>", "(Ljava/lang/String;I)V", false);
+                    } else {
+                        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, superInternal, "<init>", "()V", false);
+                    }
                     emitInstanceFieldInitializers(classDecl, classInternal, new ExpressionGenerator(ctx), mv);
                     gen.generateBody(methodDecl.body());
                 } else if (startsWithSuperCall(methodDecl)) {

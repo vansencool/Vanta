@@ -151,7 +151,7 @@ public final class AssignmentEmitter {
             String elemDesc = elemType != null ? elemType.descriptor() : "I";
             if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "the array element", elemType, assignment.value());
             exprGen.generate(arrayAccess.array());
-            exprGen.generate(arrayAccess.index());
+            exprGen.generateArrayIndex(arrayAccess.index());
             if ("=".equals(assignment.operator())) {
                 exprGen.generateForAssign(assignment.value(), elemType);
                 if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
@@ -277,12 +277,12 @@ public final class AssignmentEmitter {
             if ("=".equals(assignment.operator()) && elemType != null) checkAssignable(assignment, "the array element", elemType, assignment.value());
             if ("=".equals(assignment.operator())) {
                 exprGen.generate(arrayAccess.array());
-                exprGen.generate(arrayAccess.index());
+                exprGen.generateArrayIndex(arrayAccess.index());
                 exprGen.generateForAssign(assignment.value(), elemType);
                 if (elemType != null) exprGen.numericCoercion().adaptForStore(elemType, assignment.value());
             } else {
                 exprGen.generate(arrayAccess.array());
-                exprGen.generate(arrayAccess.index());
+                exprGen.generateArrayIndex(arrayAccess.index());
                 ctx.mv().visitInsn(Opcodes.DUP2);
                 ctx.mv().visitInsn(exprGen.arrayEmitter().arrayLoadOpcodeFor(arrayAccess));
                 exprGen.generate(assignment.value());

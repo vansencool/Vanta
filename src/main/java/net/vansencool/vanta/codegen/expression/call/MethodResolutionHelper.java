@@ -71,7 +71,7 @@ public final class MethodResolutionHelper {
                 allInferred = false;
                 break;
             }
-            argDescriptors.add(type.descriptor());
+            argDescriptors.add(type == ResolvedType.NULL ? MethodResolver.NULL_ARG_DESC : type.descriptor());
         }
         if (allInferred) {
             String resolved = ctx.methodResolver().resolveConstructor(ownerInternal, argDescriptors);
@@ -156,29 +156,41 @@ public final class MethodResolutionHelper {
         if (overloads == null) return info;
         int argCount = call.arguments().size();
         String[] argDescs = new String[argCount];
+        boolean[] isNullArg = new boolean[argCount];
         for (int i = 0; i < argCount; i++) {
             ResolvedType t = ctx.typeInferrer().infer(call.arguments().get(i));
             if (t == null) return info;
             argDescs[i] = t.descriptor();
+            isNullArg[i] = t == ResolvedType.NULL;
         }
         overloads.add(info);
         SelfMethodInfo best = null;
         Type[] bestParams = null;
         for (SelfMethodInfo cand : overloads) {
             Type[] params = ctx.methodResolver().classpathManager().argumentTypes(cand.descriptor());
-            if (params.length != argCount) continue;
+            boolean candVarargs = cand.isVarargs() && params.length > 0 && params[params.length - 1].getSort() == Type.ARRAY;
+            if (params.length != argCount && !(candVarargs && argCount >= params.length - 1)) continue;
             boolean ok = true;
-            for (int i = 0; i < params.length; i++) {
-                if (!ctx.methodResolver().isDescriptorAssignableWithClasspath(argDescs[i], params[i].getDescriptor())) {
-                    ok = false;
-                    break;
+            int fixedCount = candVarargs ? params.length - 1 : params.length;
+            for (int i = 0; i < fixedCount && ok; i++) {
+                ok = argMatchesParam(ctx, argDescs, isNullArg, i, params[i].getDescriptor());
+            }
+            if (ok && candVarargs) {
+                String arrayDesc = params[params.length - 1].getDescriptor();
+                boolean arrayForm = argCount == params.length && !isNullArg[argCount - 1]
+                        && ctx.methodResolver().isDescriptorAssignableWithClasspath(argDescs[argCount - 1], arrayDesc);
+                if (!arrayForm) {
+                    String elemDesc = arrayDesc.substring(1);
+                    for (int i = fixedCount; i < argCount && ok; i++) {
+                        ok = argMatchesParam(ctx, argDescs, isNullArg, i, elemDesc);
+                    }
                 }
             }
             if (ok) {
                 if (best == null) {
                     best = cand;
                     bestParams = params;
-                } else {
+                } else if (params.length == bestParams.length) {
                     boolean candMoreSpecific = true;
                     for (int i = 0; i < params.length; i++) {
                         if (!ctx.methodResolver().isDescriptorAssignableWithClasspath(params[i].getDescriptor(), bestParams[i].getDescriptor())) {
@@ -190,10 +202,18 @@ public final class MethodResolutionHelper {
                         best = cand;
                         bestParams = params;
                     }
+                } else if (params.length == argCount) {
+                    best = cand;
+                    bestParams = params;
                 }
             }
         }
         return best != null ? best : info;
+    }
+
+    private static boolean argMatchesParam(@NotNull MethodContext ctx, String @NotNull [] argDescs, boolean @NotNull [] isNullArg, int i, @NotNull String paramDesc) {
+        if (isNullArg[i]) return paramDesc.startsWith("L") || paramDesc.startsWith("[");
+        return ctx.methodResolver().isDescriptorAssignableWithClasspath(argDescs[i], paramDesc);
     }
 
     /**
@@ -209,6 +229,7 @@ public final class MethodResolutionHelper {
     public @Nullable MethodResolver.ResolvedMethod resolveMethodWithArgTypes(@NotNull String ownerInternal, @NotNull String methodName, @NotNull List<Expression> arguments) {
         MethodContext ctx = exprGen.ctx();
         List<String> argDescriptors = new ArrayList<>();
+        String[] knownArgDescs = new String[arguments.size()];
         int[] lambdaArities = new int[arguments.size()];
         boolean[] isLambdaArg = new boolean[arguments.size()];
         boolean allInferred = true;
@@ -226,12 +247,14 @@ public final class MethodResolutionHelper {
                 allInferred = false;
                 continue;
             }
-            argDescriptors.add(type.descriptor());
+            String desc = type == ResolvedType.NULL ? MethodResolver.NULL_ARG_DESC : type.descriptor();
+            argDescriptors.add(desc);
+            knownArgDescs[i] = desc;
         }
         if (allInferred) {
             MethodResolver.ResolvedMethod resolved = ctx.methodResolver().resolveMethod(ownerInternal, methodName, argDescriptors);
             if (resolved != null) return resolved;
         }
-        return ctx.methodResolver().resolveMethodWithLambdaHints(ownerInternal, methodName, arguments.size(), isLambdaArg, lambdaArities);
+        return ctx.methodResolver().resolveMethodWithLambdaHints(ownerInternal, methodName, arguments.size(), isLambdaArg, lambdaArities, knownArgDescs);
     }
 }

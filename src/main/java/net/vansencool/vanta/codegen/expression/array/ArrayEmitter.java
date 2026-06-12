@@ -79,7 +79,7 @@ public final class ArrayEmitter {
     public void emitArrayAccess(@NotNull ArrayAccessExpression arrayAccess) {
         MethodContext ctx = exprGen.ctx();
         exprGen.generate(arrayAccess.array());
-        exprGen.generate(arrayAccess.index());
+        exprGen.generateArrayIndex(arrayAccess.index());
         ResolvedType arrayType = ctx.typeInferrer().infer(arrayAccess.array());
         if (arrayType != null && arrayType.descriptor().startsWith("[")) {
             String elementDesc = arrayType.descriptor().substring(1);

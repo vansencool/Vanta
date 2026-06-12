@@ -213,6 +213,17 @@ public final class ExpressionGenerator {
     }
 
     /**
+     * Emits an array index expression, unboxing a wrapper valued index to {@code int}.
+     */
+    public void generateArrayIndex(@NotNull Expression index) {
+        generate(index);
+        ResolvedType t = ctx.typeInferrer().infer(index);
+        if (t != null && !t.isPrimitive() && t.internalName() != null && numericCoercion().primitiveForWrapperDesc(t.descriptor()) != null) {
+            unboxingEmitter().emit(ctx.mv(), "I", t.internalName());
+        }
+    }
+
+    /**
      * Records that an inlined constant was pushed already widened to the expected type.
      */
     public void markInlinePushedWidened() {

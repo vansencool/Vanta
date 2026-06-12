@@ -187,7 +187,7 @@ public final class ObjectCreationEmitter {
             List<String> superArgDescsForLookup = new ArrayList<>();
             for (Expression a : newExpr.arguments()) {
                 ResolvedType t = ctx.typeInferrer().infer(a);
-                superArgDescsForLookup.add(t != null ? t.descriptor() : "Ljava/lang/Object;");
+                superArgDescsForLookup.add(t == null ? "Ljava/lang/Object;" : t == ResolvedType.NULL ? MethodResolver.NULL_ARG_DESC : t.descriptor());
             }
             MethodSymbol superCtor = ctx.methodResolver().resolveConstructorSymbol(superInternal, superArgDescsForLookup);
             boolean isVarargsCtor = superCtor != null && superCtor.isVarargs();
@@ -215,7 +215,7 @@ public final class ObjectCreationEmitter {
             List<String> argDescsForLookup = new ArrayList<>();
             for (Expression a : newExpr.arguments()) {
                 ResolvedType t = ctx.typeInferrer().infer(a);
-                argDescsForLookup.add(t != null ? t.descriptor() : "Ljava/lang/Object;");
+                argDescsForLookup.add(t == null ? "Ljava/lang/Object;" : t == ResolvedType.NULL ? MethodResolver.NULL_ARG_DESC : t.descriptor());
             }
             MethodSymbol ctorSym = ctx.methodResolver().resolveConstructorSymbol(declaredType, argDescsForLookup);
             if (ctorSym == null) ctorSym = uniqueCtorByArity(declaredType, newExpr.arguments().size());
@@ -387,7 +387,7 @@ public final class ObjectCreationEmitter {
             List<String> rawArgDescs = new ArrayList<>();
             for (Expression a : superArgs) {
                 ResolvedType t = ctx.typeInferrer().infer(a);
-                rawArgDescs.add(t != null ? t.descriptor() : "Ljava/lang/Object;");
+                rawArgDescs.add(t == null ? "Ljava/lang/Object;" : t == ResolvedType.NULL ? MethodResolver.NULL_ARG_DESC : t.descriptor());
             }
             String[] resolvedSuperParams = resolveSuperCtorDescs(superInternal, rawArgDescs);
             List<String> superArgDescs = new ArrayList<>();

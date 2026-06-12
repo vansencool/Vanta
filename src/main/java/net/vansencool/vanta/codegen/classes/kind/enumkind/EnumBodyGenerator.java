@@ -103,8 +103,9 @@ public final class EnumBodyGenerator {
 
         emitValues(cw, internalName, enumDesc);
         emitValueOf(cw, internalName, enumDesc);
-        emitConstructor(cw, hasAnonConstants);
-        emitClinit(cw, internalName, enumDesc, constants);
+        boolean hasDeclaredCtor = classDecl.members().stream().anyMatch(m -> m instanceof MethodDeclaration md && "<init>".equals(md.name()));
+        if (!hasDeclaredCtor) emitConstructor(cw, hasAnonConstants);
+        emitClinit(cw, internalName, enumDesc, constants, classDecl);
         emitDollarValues(cw, internalName, enumDesc, constants);
 
         cw.visitEnd();
@@ -178,11 +179,30 @@ public final class EnumBodyGenerator {
     }
 
     /**
+     * The declared enum constructor with {@code argCount} parameters, or null when none matches.
+     */
+    private @Nullable MethodDeclaration declaredCtorByArity(@NotNull ClassDeclaration classDecl, int argCount) {
+        for (AstNode member : classDecl.members()) {
+            if (member instanceof MethodDeclaration md && "<init>".equals(md.name()) && md.parameters().size() == argCount) return md;
+        }
+        return null;
+    }
+
+    /**
+     * The declared constructor's descriptor with the synthetic name and ordinal prefix.
+     */
+    private @NotNull String prefixedCtorDesc(@NotNull MethodDeclaration ctor) {
+        StringBuilder sb = new StringBuilder("(Ljava/lang/String;I");
+        for (Parameter p : ctor.parameters()) sb.append(owner.typeResolver().resolve(p.type()).descriptor());
+        return sb.append(")V").toString();
+    }
+
+    /**
      * Emits the {@code <clinit>} that instantiates every enum constant (via
      * synthetic {@code Foo$N} subclasses when a constant carries an anonymous
      * body) and then populates {@code $VALUES}.
      */
-    private void emitClinit(@NotNull ClassWriter cw, @NotNull String internalName, @NotNull String enumDesc, @NotNull List<EnumConstant> constants) {
+    private void emitClinit(@NotNull ClassWriter cw, @NotNull String internalName, @NotNull String enumDesc, @NotNull List<EnumConstant> constants, @NotNull ClassDeclaration classDecl) {
         MethodVisitor mv = cw.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
         mv.visitCode();
 
@@ -190,7 +210,8 @@ public final class EnumBodyGenerator {
         for (int i = 0; i < constants.size(); i++) {
             EnumConstant constant = constants.get(i);
             String ctorOwner = internalName;
-            String ctorDesc = "(Ljava/lang/String;I)V";
+            MethodDeclaration declaredCtor = declaredCtorByArity(classDecl, constant.arguments().size());
+            String ctorDesc = declaredCtor != null ? prefixedCtorDesc(declaredCtor) : "(Ljava/lang/String;I)V";
             if (constant.classBody() != null) {
                 anonIdx++;
                 ctorOwner = internalName + "$" + anonIdx;
@@ -200,7 +221,8 @@ public final class EnumBodyGenerator {
             mv.visitInsn(Opcodes.DUP);
             mv.visitLdcInsn(constant.name());
             OpcodeUtils.pushInt(mv, i);
-            for (Expression arg : constant.arguments()) {
+            for (int a = 0; a < constant.arguments().size(); a++) {
+                Expression arg = constant.arguments().get(a);
                 MethodContext clinitCtx = new MethodContext(mv, new Scope(0), owner.typeResolver(), new MethodResolver(owner.classpathManager()), internalName, "java/lang/Enum", true, new HashMap<>());
                 clinitCtx.nestedClassFields(owner.nestedClassFields());
                 clinitCtx.nestedClassMethods(owner.nestedClassMethods());
@@ -208,7 +230,13 @@ public final class EnumBodyGenerator {
                 clinitCtx.setupLambdaSupport(cw, owner.lambdaCounter(), "<clinit>");
                 clinitCtx.setupAnonClassSupport(owner, cw, owner.anonClassCounter(), "<clinit>", owner.anonClassBytecodes(), owner.anonClassNames());
                 ExpressionGenerator clinitExpr = new ExpressionGenerator(clinitCtx);
-                clinitExpr.generate(arg);
+                if (declaredCtor != null && a < declaredCtor.parameters().size()) {
+                    ResolvedType paramType = owner.typeResolver().resolve(declaredCtor.parameters().get(a).type());
+                    clinitExpr.generateForAssign(arg, paramType);
+                    clinitExpr.numericCoercion().adaptForStore(paramType, arg);
+                } else {
+                    clinitExpr.generate(arg);
+                }
             }
             mv.visitMethodInsn(Opcodes.INVOKESPECIAL, ctorOwner, "<init>", ctorDesc, false);
             mv.visitFieldInsn(Opcodes.PUTSTATIC, internalName, constant.name(), enumDesc);

@@ -24,6 +24,8 @@ import java.util.List;
  */
 public record MethodResolver(@NotNull ClasspathManager classpathManager) {
 
+    public static final @NotNull String NULL_ARG_DESC = "Lnull;";
+
     public static boolean isDescriptorAssignable(@NotNull String argDesc, @NotNull String paramDesc) {
         return isAssignable(argDesc, paramDesc, null);
     }
@@ -33,6 +35,7 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
     }
 
     private static boolean isAssignable(@NotNull String argDesc, @NotNull String paramDesc, @Nullable TypeRegistry registry) {
+        if (NULL_ARG_DESC.equals(argDesc)) return paramDesc.startsWith("L") || paramDesc.startsWith("[");
         if (argDesc.equals(paramDesc)) return true;
         if (paramDesc.equals("Ljava/lang/Object;") && argDesc.startsWith("L")) return true;
         if (paramDesc.equals("Ljava/lang/Object;") && argDesc.startsWith("[")) return true;
@@ -199,6 +202,13 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
      * narrow the choice.
      */
     public @Nullable ResolvedMethod resolveMethodWithLambdaHints(@NotNull String ownerInternal, @NotNull String methodName, int argCount, boolean @NotNull [] isLambdaArg, int @NotNull [] lambdaArities) {
+        return resolveMethodWithLambdaHints(ownerInternal, methodName, argCount, isLambdaArg, lambdaArities, null);
+    }
+
+    /**
+     * Variant that also checks the non lambda argument positions whose types inferred, rejecting overloads they cannot reach.
+     */
+    public @Nullable ResolvedMethod resolveMethodWithLambdaHints(@NotNull String ownerInternal, @NotNull String methodName, int argCount, boolean @NotNull [] isLambdaArg, int @NotNull [] lambdaArities, String @Nullable [] knownArgDescs) {
         boolean anyLambda = false;
         for (boolean b : isLambdaArg) {
             if (b) {
@@ -218,6 +228,7 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
             if (m.isBridge()) continue;
             if (m.parameterTypes().size() != argCount) continue;
             if (!matchesLambdaHints(m.parameterTypes(), isLambdaArg, lambdaArities, registry)) continue;
+            if (!matchesKnownArgs(m.parameterTypes(), isLambdaArg, knownArgDescs, registry)) continue;
             ResolvedMethod candidate = buildResolved(m, owner, ownerInternal);
             if (best == null) {
                 best = candidate;
@@ -228,6 +239,15 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
             }
         }
         return best != null ? best : resolveMethod(ownerInternal, methodName, argCount);
+    }
+
+    private static boolean matchesKnownArgs(@NotNull List<TypeRef> params, boolean @NotNull [] isLambdaArg, String @Nullable [] knownArgDescs, @NotNull TypeRegistry registry) {
+        if (knownArgDescs == null) return true;
+        for (int i = 0; i < params.size() && i < knownArgDescs.length; i++) {
+            if (isLambdaArg[i] || knownArgDescs[i] == null) continue;
+            if (!isAssignable(knownArgDescs[i], params.get(i).descriptor(), registry)) return false;
+        }
+        return true;
     }
 
     private boolean matchesLambdaHints(@NotNull List<TypeRef> params, boolean @NotNull [] isLambdaArg, int @NotNull [] lambdaArities, @NotNull TypeRegistry registry) {
@@ -582,6 +602,19 @@ public record MethodResolver(@NotNull ClasspathManager classpathManager) {
             if (bestVarArg == null) bestVarArg = m;
         }
         if (bestVarArg != null) return bestVarArg.descriptor();
+        MethodSymbol privateMatch = null;
+        for (MethodSymbol m : owner.methods()) {
+            if (!"<init>".equals(m.name())) continue;
+            if ((m.access() & Opcodes.ACC_PRIVATE) == 0) continue;
+            if (m.parameterTypes().size() != argDescriptors.size()) continue;
+            if (!isApplicable(m, argDescriptors, registry)) continue;
+            if (privateMatch == null) {
+                privateMatch = m;
+            } else if (isMoreSpecific(registry, privateMatch.parameterTypes(), m.parameterTypes(), argDescriptors)) {
+                privateMatch = m;
+            }
+        }
+        if (privateMatch != null) return privateMatch.descriptor();
         return resolveConstructor(ownerInternal, argDescriptors.size());
     }
 

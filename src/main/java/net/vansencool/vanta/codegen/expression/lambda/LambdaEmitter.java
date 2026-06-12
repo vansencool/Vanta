@@ -58,12 +58,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Emits bytecode for lambda expressions and method references. Both lower to
- * an {@code invokedynamic} call through {@link java.lang.invoke.LambdaMetafactory},
- * so this class concentrates: SAM method discovery and generic param
- * resolution, capture analysis over the lambda body, emission of the
- * synthetic {@code lambda$<enclosing>$N} backing method, and assembly of
- * the final {@code invokedynamic} instruction.
+ * Emits bytecode for lambda expressions and method references.
  */
 public final class LambdaEmitter {
 
@@ -377,6 +372,7 @@ public final class LambdaEmitter {
         MethodContext lambdaCtx = new MethodContext(lambdaBuffer, lambdaScope, ctx.typeResolver(), new MethodResolver(ctx.methodResolver().classpathManager()), ctx.classInternalName(), ctx.superInternalName(), !needsThis, ctx.selfMethods());
         lambdaCtx.classGenerator(ctx.classGenerator());
         lambdaCtx.setupLambdaSupport(cw, ctx.lambdaCounter() != null ? ctx.lambdaCounter() : new AtomicInteger(), lambdaMethodName);
+        lambdaCtx.setupAnonClassSupport(ctx.classGenerator(), cw, ctx.anonClassCounter() != null ? ctx.anonClassCounter() : new AtomicInteger(), lambdaMethodName, ctx.anonClassBytecodes(), ctx.anonClassNames());
         lambdaCtx.typeInferrer().registerSelfMethods(ctx.selfMethods());
         lambdaCtx.typeInferrer().copyFieldsFrom(ctx.typeInferrer());
         lambdaCtx.enclosingOuterInternal(ctx.enclosingOuterInternal());
@@ -400,6 +396,10 @@ public final class LambdaEmitter {
             } else {
                 if (exprType != null && exprType.isPrimitive() && !instantiatedReturn.isPrimitive()) {
                     PrimitiveConversionEmitter.emitBoxing(lambdaBuffer, exprType);
+                } else if (exprType != null && exprType.isPrimitive() && instantiatedReturn.isPrimitive() && !exprType.descriptor().equals(instantiatedReturn.descriptor())) {
+                    PrimitiveConversionEmitter.emitPrimitiveWidening(lambdaBuffer, exprType.descriptor(), instantiatedReturn.descriptor());
+                } else if (exprType != null && !exprType.isPrimitive() && instantiatedReturn.isPrimitive()) {
+                    lambdaExprGen.unboxingEmitter().forReturn(lambdaBuffer, exprType, instantiatedReturn);
                 }
                 lambdaBuffer.visitInsn(returnInsnFor(instantiatedReturn));
             }
