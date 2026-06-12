@@ -27,6 +27,7 @@ import net.vansencool.vanta.parser.ast.expression.LambdaExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodCallExpression;
 import net.vansencool.vanta.parser.ast.expression.MethodReferenceExpression;
 import net.vansencool.vanta.parser.ast.expression.NameExpression;
+import net.vansencool.vanta.parser.ast.expression.SuperExpression;
 import net.vansencool.vanta.parser.ast.expression.ThisExpression;
 import net.vansencool.vanta.parser.ast.statement.BlockStatement;
 import net.vansencool.vanta.parser.ast.type.TypeNode;
@@ -261,6 +262,12 @@ public final class LambdaEmitter {
         boolean bindReceiver = !isStaticTarget && !isUnboundInstanceRef && !targetIsCtor && !fallbackIsCtor && !refTargetIsType;
         if (bindReceiver) {
             exprGen.generate(ref.target());
+            Expression recvExpr = exprGen.unwrapParens(ref.target());
+            if (!(recvExpr instanceof ThisExpression) && !(recvExpr instanceof SuperExpression)) {
+                ctx.mv().visitInsn(Opcodes.DUP);
+                ctx.mv().visitMethodInsn(Opcodes.INVOKESTATIC, "java/util/Objects", "requireNonNull", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                ctx.mv().visitInsn(Opcodes.POP);
+            }
             ResolvedType recvType = ctx.typeInferrer().infer(ref.target());
             if (recvType != null && recvType.internalName() != null)
                 indyDesc.append("L").append(recvType.internalName()).append(";");
