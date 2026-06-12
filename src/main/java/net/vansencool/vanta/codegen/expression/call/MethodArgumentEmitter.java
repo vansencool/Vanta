@@ -397,7 +397,9 @@ public final class MethodArgumentEmitter {
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                 mv.visitFieldInsn(Opcodes.GETFIELD, ctx.classInternalName(), "this$0", "L" + outerInternal + ";");
                 generateArgs(call.arguments(), desc, outerSelf.isVarargs());
-                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, outerSelf.owner(), outerSelf.name(), desc, false);
+                TypeSymbol outerSym = ctx.methodResolver().classpathManager().typeRegistry().lookup(outerSelf.owner());
+                boolean outerIsInterface = outerSym != null && outerSym.isInterface();
+                mv.visitMethodInsn(outerIsInterface ? Opcodes.INVOKEINTERFACE : Opcodes.INVOKEVIRTUAL, outerSelf.owner(), outerSelf.name(), desc, outerIsInterface);
             } else {
                 return null;
             }

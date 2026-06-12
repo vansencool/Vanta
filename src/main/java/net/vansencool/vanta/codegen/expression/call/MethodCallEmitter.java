@@ -115,7 +115,9 @@ public final class MethodCallEmitter {
                             exprGen.generate(call.target());
                             exprGen.methodArgumentEmitter().generateArgs(call.arguments(), selfInfo.descriptor());
                         }
-                        mv.visitMethodInsn(selfInfo.isStatic() ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), false);
+                        boolean selfOwnerIsInterface = ownerIsInterface(ctx, selfInfo.owner());
+                        int selfOpcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : selfOwnerIsInterface ? Opcodes.INVOKEINTERFACE : Opcodes.INVOKEVIRTUAL;
+                        mv.visitMethodInsn(selfOpcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), selfOwnerIsInterface);
                         return !selfInfo.descriptor().endsWith(")V");
                     }
                 }
@@ -200,8 +202,9 @@ public final class MethodCallEmitter {
             } finally {
                 exprGen.discardDepth(savedDiscard);
             }
-            int opcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : Opcodes.INVOKEVIRTUAL;
-            mv.visitMethodInsn(opcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), false);
+            boolean selfOwnerIsInterface = ownerIsInterface(ctx, selfInfo.owner());
+            int opcode = selfInfo.isStatic() ? Opcodes.INVOKESTATIC : selfOwnerIsInterface ? Opcodes.INVOKEINTERFACE : Opcodes.INVOKEVIRTUAL;
+            mv.visitMethodInsn(opcode, selfInfo.owner(), selfInfo.name(), selfInfo.descriptor(), selfOwnerIsInterface);
             if (resolvedSelf != null) exprGen.emitGenericReturnCheckcast(call, resolvedSelf);
             return !selfInfo.descriptor().endsWith(")V");
         }
@@ -230,6 +233,14 @@ public final class MethodCallEmitter {
             return !selfResolved.descriptor().endsWith(")V");
         }
         throw new CompilationException(SelfMethodDiagnostic.build(ctx, call));
+    }
+
+    /**
+     * True when {@code ownerInternal} resolves to an interface in the registry.
+     */
+    private static boolean ownerIsInterface(@NotNull MethodContext ctx, @NotNull String ownerInternal) {
+        var sym = ctx.methodResolver().classpathManager().typeRegistry().lookup(ownerInternal);
+        return sym != null && sym.isInterface();
     }
 
     /**
