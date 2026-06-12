@@ -380,12 +380,7 @@ public final class ConstantFolder {
             case DOUBLE_LITERAL -> Double.parseDouble(lit.value().replace("_", "").replace("d", "").replace("D", ""));
             case TRUE -> 1;
             case FALSE -> 0;
-            case CHAR_LITERAL -> {
-                String v = lit.value();
-                if (v.length() >= 2 && v.charAt(0) == '\'' && v.charAt(v.length() - 1) == '\'')
-                    v = v.substring(1, v.length() - 1);
-                yield v.isEmpty() ? 0 : (int) v.charAt(0);
-            }
+            case CHAR_LITERAL -> (int) LiteralParser.parseCharLiteral(lit.value());
             case STRING_LITERAL, TEXT_BLOCK -> unescapeStringLiteral(lit.value());
             default -> null;
         };
