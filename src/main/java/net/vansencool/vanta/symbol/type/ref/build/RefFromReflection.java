@@ -29,7 +29,13 @@ public final class RefFromReflection {
             TypeRef element = from(gat.getGenericComponentType());
             return TypeRefs.ofArray(element, 1);
         }
-        if (type instanceof TypeVariable<?> tv) return TypeRefs.ofTypeVariable(tv.getName());
+        if (type instanceof TypeVariable<?> tv) {
+            Type[] bounds = tv.getBounds();
+            Type first = bounds.length > 0 ? bounds[0] : null;
+            Class<?> raw = first instanceof Class<?> c ? c : first instanceof ParameterizedType pt && pt.getRawType() instanceof Class<?> rc ? rc : null;
+            if (raw != null && raw != Object.class) return TypeRefs.ofTypeVariable(tv.getName(), raw.getName().replace('.', '/'));
+            return TypeRefs.ofTypeVariable(tv.getName());
+        }
         if (type instanceof WildcardType wt) {
             Type[] upper = wt.getUpperBounds();
             if (upper.length > 0) return from(upper[0]);

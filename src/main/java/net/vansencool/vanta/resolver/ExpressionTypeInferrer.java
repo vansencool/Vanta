@@ -672,7 +672,13 @@ public final class ExpressionTypeInferrer {
             if (name != null && receiverType != null && receiverType.typeArguments() != null) {
                 List<TypeParameterSymbol> classParams = method.owner().typeParameters();
                 for (int i = 0; i < classParams.size() && i < receiverType.typeArguments().size(); i++) {
-                    if (classParams.get(i).name().equals(name)) return withReturnDims(receiverType.typeArguments().get(i), ret);
+                    if (classParams.get(i).name().equals(name)) {
+                        ResolvedType bound = receiverType.typeArguments().get(i);
+                        if ("java/lang/Object".equals(bound.internalName()) && ret.internalName() != null && !"java/lang/Object".equals(ret.internalName())) {
+                            return withReturnDims(ResolvedType.ofObject(ret.internalName()), ret);
+                        }
+                        return withReturnDims(bound, ret);
+                    }
                 }
             }
             if (call != null) {
@@ -731,7 +737,12 @@ public final class ExpressionTypeInferrer {
                 }
                 return argType;
             }
-            if (!p.typeArguments().isEmpty() && mentionsVariable(p.typeArguments().get(p.typeArguments().size() - 1), tvName)) {
+            if (!p.typeArguments().isEmpty() && mentionsVariable(p, tvName)) {
+                ResolvedType argType = infer(args.get(i));
+                if (argType != null && argType != ResolvedType.NULL) {
+                    ResolvedType unified = unifyVariable(p, argType, tvName);
+                    if (unified != null) return unified;
+                }
                 ResolvedType fromSam = samReturnOfArg(args.get(i));
                 if (fromSam != null) {
                     ResolvedType unified = unifyVariable(p.typeArguments().get(p.typeArguments().size() - 1), fromSam, tvName);
@@ -827,7 +838,16 @@ public final class ExpressionTypeInferrer {
 
 
     private @Nullable ResolvedType inferFieldAccess(@NotNull FieldAccessExpression fieldAccess) {
-        if ("class".equals(fieldAccess.fieldName())) return ResolvedType.ofObject("java/lang/Class");
+        if ("class".equals(fieldAccess.fieldName())) {
+            ResolvedType bare = ResolvedType.ofObject("java/lang/Class");
+            if (fieldAccess.target() instanceof NameExpression ne) {
+                ResolvedType targetType = typeResolver.resolve(new TypeNode(ne.name(), null, 0, fieldAccess.line()));
+                if (targetType.internalName() != null && targetType.descriptor().startsWith("L")) {
+                    return bare.withTypeArguments(List.of(ResolvedType.ofObject(targetType.internalName())));
+                }
+            }
+            return bare;
+        }
         if ("this".equals(fieldAccess.fieldName()) && fieldAccess.target() instanceof NameExpression ne) {
             String enclosingOuter = enclosingOuterInternal();
             if (enclosingOuter != null) {
